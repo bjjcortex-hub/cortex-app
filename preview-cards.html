@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<title>BJJ Flow — Preview de Cards</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: Inter, system-ui, sans-serif;
+    background: #F0F2F5;
+    min-height: 100vh;
+    padding: 40px;
+  }
+
+  /* ── Legend ───────────────────────────────────────────────────── */
+  .legend {
+    display: flex; gap: 10px; align-items: center;
+    margin-bottom: 28px; flex-wrap: wrap;
+  }
+  .legend-item {
+    display: flex; gap: 6px; align-items: center;
+    font-size: 11px; color: #6B7280; font-weight: 500;
+  }
+  .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+
+  /* ── Canvas area ──────────────────────────────────────────────── */
+  .canvas {
+    position: relative;
+    background: #F0F2F5;
+    background-image: radial-gradient(circle, #DDE1E7 1px, transparent 1px);
+    background-size: 24px 24px;
+    border-radius: 16px;
+    border: 1px solid #E2E5EC;
+    min-height: 640px;
+    overflow: hidden;
+  }
+
+  /* ── Card base ────────────────────────────────────────────────── */
+  .bjj-card {
+    position: absolute;
+    background: #FFFFFF;
+    border-radius: 12px;
+    border: 1px solid #E5E8ED;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    width: 240px;
+    cursor: default;
+    transition: box-shadow 0.15s;
+  }
+  .bjj-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.10) }
+  .bjj-card.selected {
+    border: 2px solid #2E77FF;
+    box-shadow: 0 0 0 4px rgba(46,119,255,0.12), 0 4px 16px rgba(0,0,0,0.10);
+  }
+
+  /* ── Card header ──────────────────────────────────────────────── */
+  .card-header { padding: 12px 14px 10px; }
+  .card-type-row {
+    display: flex; align-items: center; gap: 8px; margin-bottom: 6px;
+  }
+  .card-icon {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .card-icon svg { width: 12px; height: 12px; stroke: #fff; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+  .card-icon.position   { background: #2E77FF; }
+  .card-icon.transition { background: #8B5CF6; }
+  .card-icon.submission { background: #EF4444; }
+  .card-icon.principle  { background: #10B981; }
+
+  .card-type-label {
+    font-size: 10px; font-weight: 600; color: #9CA3AF;
+    text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .card-title {
+    font-size: 14px; font-weight: 700; color: #1F2937;
+    line-height: 1.3;
+  }
+
+  /* ── Card divider ─────────────────────────────────────────────── */
+  .card-divider { height: 1px; background: #F3F4F6; margin: 0 14px; }
+
+  /* ── Output rows ──────────────────────────────────────────────── */
+  .card-outputs { padding: 0; }
+  .card-output-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px;
+    border-bottom: 1px solid #F3F4F6;
+    cursor: pointer; transition: background 0.1s;
+    position: relative;
+  }
+  .card-output-row:last-child { border-bottom: none; border-radius: 0 0 12px 12px; }
+  .card-output-row:hover { background: #F9FAFB; }
+  .card-output-label { font-size: 12px; color: #374151; font-weight: 500; }
+  .card-output-handle {
+    width: 10px; height: 10px; border-radius: 50%;
+    flex-shrink: 0; border: 2px solid;
+  }
+  .card-output-handle.active   { background: #2E77FF; border-color: #2E77FF; }
+  .card-output-handle.inactive { background: #fff; border-color: #9CA3AF; }
+
+  /* ── Group card ───────────────────────────────────────────────── */
+  .bjj-card.group { width: 268px; }
+  .group-children { padding: 8px 12px 10px; display: flex; flex-direction: column; gap: 8px; }
+  .mini-card {
+    background: #F9FAFB;
+    border: 1px solid #E5E8ED;
+    border-radius: 8px;
+    overflow: hidden;
+  }
+  .mini-card-header {
+    display: flex; align-items: center; gap: 7px;
+    padding: 8px 10px 6px;
+  }
+  .mini-card-icon {
+    width: 16px; height: 16px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .mini-card-icon svg { width: 8px; height: 8px; stroke: #fff; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+  .mini-card-icon.position   { background: #2E77FF; }
+  .mini-card-title { font-size: 12px; font-weight: 600; color: #1F2937; }
+  .mini-card-output {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 6px 10px;
+    border-top: 1px solid #F3F4F6;
+    position: relative;
+  }
+  .mini-card-output-label { font-size: 11px; color: #6B7280; }
+
+  /* ── Handles on card edges ────────────────────────────────────── */
+  .handle-in {
+    position: absolute; left: -5px; top: 50%; transform: translateY(-50%);
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #9CA3AF; border: 2px solid #fff;
+    box-shadow: 0 0 0 1px #9CA3AF;
+  }
+  .handle-out {
+    position: absolute; right: -5px; top: 50%; transform: translateY(-50%);
+    width: 10px; height: 10px; border-radius: 50%;
+    background: #2E77FF; border: 2px solid #fff;
+    box-shadow: 0 0 0 1px #2E77FF;
+  }
+  .handle-out.submission { background: #EF4444; box-shadow: 0 0 0 1px #EF4444; }
+  .handle-out.inactive   { background: #9CA3AF; box-shadow: 0 0 0 1px #9CA3AF; }
+
+  /* ── SVG arrows overlay ───────────────────────────────────────── */
+  .svg-overlay {
+    position: absolute; inset: 0; pointer-events: none; overflow: visible;
+  }
+
+  /* ── Floating controls ────────────────────────────────────────── */
+  .controls {
+    position: absolute; right: 16px; bottom: 16px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .ctrl-btn {
+    width: 32px; height: 32px; border-radius: 8px;
+    background: #fff; border: 1px solid #E5E8ED;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; color: #6B7280;
+    cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.08);
+  }
+  .ctrl-btn:hover { background: #F9FAFB; }
+
+  /* ── Section title ─────────────────────────────────────────────── */
+  h2 { font-size: 13px; font-weight: 700; color: #6B7280; letter-spacing: 0.4px; text-transform: uppercase; margin-bottom: 16px; }
+
+  /* ── State labels ──────────────────────────────────────────────── */
+  .state-label {
+    position: absolute; font-size: 10px; font-weight: 600; color: #9CA3AF;
+    text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap;
+  }
+</style>
+</head>
+<body>
+
+<h2>Preview de Cards — BJJ Flow Builder</h2>
+
+<div class="legend">
+  <span class="legend-item"><span class="legend-dot" style="background:#2E77FF"></span>Posição</span>
+  <span class="legend-item"><span class="legend-dot" style="background:#8B5CF6"></span>Transição</span>
+  <span class="legend-item"><span class="legend-dot" style="background:#EF4444"></span>Finalização</span>
+  <span class="legend-item"><span class="legend-dot" style="background:#10B981"></span>Princípio</span>
+  <span style="margin-left:12px;color:#9CA3AF;font-size:11px">─── ativo &nbsp;&nbsp; - - - inativo</span>
+</div>
+
+<div class="canvas">
+
+  <!-- ── Selecionado ──────────────────────────────────────────── -->
+  <span class="state-label" style="left:52px;top:14px">Selecionado</span>
+
+  <!-- Card Posição (selecionado) -->
+  <div class="bjj-card selected" style="left:48px;top:36px">
+    <div class="card-header">
+      <div class="card-type-row">
+        <div class="card-icon position">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <span class="card-type-label">Posição</span>
+      </div>
+      <div class="card-title">Guarda Fechada</div>
+    </div>
+    <div class="card-divider"></div>
+    <div class="card-outputs">
+      <div class="card-output-row" style="position:relative">
+        <span class="card-output-label">Berimbolo</span>
+        <div class="card-output-handle active"></div>
+        <div class="handle-out" style="top:50%"></div>
+      </div>
+      <div class="card-output-row" style="position:relative">
+        <span class="card-output-label">Triângulo</span>
+        <div class="card-output-handle active"></div>
+        <div class="handle-out submission" style="top:50%"></div>
+      </div>
+      <div class="card-output-row" style="position:relative">
+        <span class="card-output-label">Raspagem Ombro</span>
+        <div class="card-output-handle inactive"></div>
+        <div class="handle-out inactive" style="top:50%"></div>
+      </div>
+    </div>
+    <div class="handle-in" style="top:40px"></div>
+  </div>
+
+  <!-- ── Normal ──────────────────────────────────────────────── -->
+  <span class="state-label" style="left:340px;top:14px">Normal / Hover</span>
+
+  <!-- Card Transição -->
+  <div class="bjj-card" style="left:336px;top:36px">
+    <div class="card-header">
+      <div class="card-type-row">
+        <div class="card-icon transition">
+          <!-- repeat icon -->
+          <svg viewBox="0 0 24 24"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        </div>
+        <span class="card-type-label">Transição</span>
+      </div>
+      <div class="card-title">Berimbolo</div>
+    </div>
+    <div class="card-divider"></div>
+    <div class="card-outputs">
+      <div class="card-output-row" style="position:relative">
+        <span class="card-output-label">Sucesso → Costas</span>
+        <div class="card-output-handle active"></div>
+        <div class="handle-out" style="top:50%"></div>
+      </div>
+      <div class="card-output-row" style="position:relative">
+        <span class="card-output-label">Falhou</span>
+        <div class="card-output-handle inactive"></div>
+        <div class="handle-out inactive" style="top:50%"></div>
+      </div>
+    </div>
+    <div class="handle-in" style="top:40px"></div>
+  </div>
+
+  <!-- ── Finalização ─────────────────────────────────────────── -->
+  <span class="state-label" style="left:340px;top:196px">Finalização</span>
+
+  <!-- Card Finalização -->
+  <div class="bjj-card" style="left:336px;top:218px">
+    <div class="card-header">
+      <div class="card-type-row">
+        <div class="card-icon submission">
+          <!-- target icon -->
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg>
+        </div>
+        <span class="card-type-label">Finalização</span>
+      </div>
+      <div class="card-title">Triângulo</div>
+    </div>
+    <div class="card-divider"></div>
+    <div class="card-outputs">
+      <div class="card-output-row" style="position:relative">
+        <span class="card-output-label">Aplicado ✓</span>
+        <div class="card-output-handle" style="background:#EF4444;border-color:#EF4444"></div>
+        <div class="handle-out submission" style="top:50%"></div>
+      </div>
+    </div>
+    <div class="handle-in" style="top:40px"></div>
+  </div>
+
+  <!-- ── Grupo (pai + filhos) ────────────────────────────────── -->
+  <span class="state-label" style="left:632px;top:14px">Card-grupo (pai + filhos)</span>
+
+  <!-- Card Grupo -->
+  <div class="bjj-card group" style="left:628px;top:36px">
+    <div class="card-header">
+      <div class="card-type-row">
+        <div class="card-icon position">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <span class="card-type-label">Posição · Grupo</span>
+      </div>
+      <div class="card-title">Montada</div>
+    </div>
+    <div class="card-divider"></div>
+    <!-- Children -->
+    <div class="group-children">
+      <!-- Mini-card Por Cima -->
+      <div class="mini-card" style="position:relative">
+        <div class="mini-card-header">
+          <div class="mini-card-icon position">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <span class="mini-card-title">Por Cima</span>
+        </div>
+        <div class="mini-card-output" style="position:relative">
+          <span class="mini-card-output-label">Mata Leão</span>
+          <div class="card-output-handle active" style="width:8px;height:8px"></div>
+          <div class="handle-out" style="top:50%;width:8px;height:8px;right:-4px;box-shadow:0 0 0 1px #2E77FF"></div>
+        </div>
+        <div class="mini-card-output" style="position:relative">
+          <span class="mini-card-output-label">Chave de Braço</span>
+          <div class="card-output-handle active" style="width:8px;height:8px"></div>
+          <div class="handle-out submission" style="top:50%;width:8px;height:8px;right:-4px;box-shadow:0 0 0 1px #EF4444"></div>
+        </div>
+        <div class="handle-in" style="top:50%;left:-4px;width:8px;height:8px;box-shadow:0 0 0 1px #9CA3AF"></div>
+      </div>
+
+      <!-- Mini-card Por Baixo -->
+      <div class="mini-card" style="position:relative">
+        <div class="mini-card-header">
+          <div class="mini-card-icon position">
+            <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          </div>
+          <span class="mini-card-title">Por Baixo</span>
+        </div>
+        <div class="mini-card-output" style="position:relative">
+          <span class="mini-card-output-label">Raspagem Elefante</span>
+          <div class="card-output-handle inactive" style="width:8px;height:8px"></div>
+          <div class="handle-out inactive" style="top:50%;width:8px;height:8px;right:-4px;box-shadow:0 0 0 1px #9CA3AF"></div>
+        </div>
+        <div class="handle-in" style="top:50%;left:-4px;width:8px;height:8px;box-shadow:0 0 0 1px #9CA3AF"></div>
+      </div>
+    </div>
+    <!-- Parent-level handles -->
+    <div class="handle-in" style="top:40px"></div>
+    <div class="handle-out" style="top:40px"></div>
+  </div>
+
+  <!-- ── SVG overlay: arrows ─────────────────────────────────── -->
+  <svg class="svg-overlay" width="1000" height="700">
+    <defs>
+      <marker id="arrow-blue" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#2E77FF"/>
+      </marker>
+      <marker id="arrow-red" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#EF4444"/>
+      </marker>
+      <marker id="arrow-gray" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto">
+        <path d="M0,0 L0,6 L9,3 z" fill="#9CA3AF"/>
+      </marker>
+    </defs>
+
+    <!-- Guarda Fechada → Berimbolo (ativo, azul) -->
+    <path d="M 293 91 C 314 91, 315 91, 336 91"
+          stroke="#2E77FF" stroke-width="2" fill="none"
+          marker-end="url(#arrow-blue)" />
+
+    <!-- Guarda Fechada → Triângulo (ativo, vermelho) -->
+    <path d="M 293 112 C 314 112, 295 280, 336 280"
+          stroke="#EF4444" stroke-width="2" fill="none"
+          marker-end="url(#arrow-red)" />
+
+    <!-- Guarda Fechada → Raspagem (inativo, tracejado) -->
+    <path d="M 293 133 C 310 133, 310 150, 310 165 C 310 180, 310 200, 310 220"
+          stroke="#9CA3AF" stroke-width="2" fill="none" stroke-dasharray="6 6"
+          marker-end="url(#arrow-gray)" opacity="0.7"/>
+  </svg>
+
+  <!-- ── Zoom controls ───────────────────────────────────────── -->
+  <div class="controls">
+    <div class="ctrl-btn">+</div>
+    <div class="ctrl-btn">−</div>
+    <div class="ctrl-btn" style="font-size:11px;font-weight:700">⊡</div>
+  </div>
+
+</div>
+
+<!-- ── JSON Structure Preview ──────────────────────────────────── -->
+<h2 style="margin-top:48px;margin-bottom:16px">Estrutura JSON proposta</h2>
+<pre style="background:#1F2937;color:#F9FAFB;border-radius:10px;padding:24px;font-size:12px;line-height:1.7;overflow-x:auto;max-width:900px">{
+  "nodes": [
+
+    // ── Nó simples ──────────────────────────────────────────────
+    {
+      "id": "uuid-db-node",          // mesmo id do banco
+      "type": "bjjNode",             // custom node React Flow
+      "position": { "x": 100, "y": 100 },
+      "data": {
+        "nodeType": "position",      // position | transition | submission | principle
+        "label":    "Guarda Fechada",
+        "labelEn":  "Closed Guard",
+        "externalId": "closed-guard",
+        "description": "...",
+        "outputs": [                 // linhas de saída (geradas das edges de saída)
+          { "id": "src-berimbolo",  "label": "Berimbolo",        "active": true  },
+          { "id": "src-triangulo",  "label": "Triângulo",        "active": true  },
+          { "id": "src-raspagem",   "label": "Raspagem Ombro",   "active": false }
+        ]
+      }
+    },
+
+    // ── Nó-grupo (pai com por-cima / por-baixo inline) ──────────
+    {
+      "id": "uuid-db-mount",
+      "type": "bjjGroupNode",        // custom node com filhos renderizados internamente
+      "position": { "x": 500, "y": 100 },
+      "data": {
+        "nodeType": "position",
+        "label":    "Montada",
+        "labelEn":  "Mount",
+        "externalId": "mount",
+        "children": [
+          {
+            "id":        "uuid-db-mount-top",
+            "nodeType":  "position",
+            "label":     "Por Cima",
+            "externalId":"mount/top",
+            "outputs": [
+              { "id": "child-top-src-mata-leao",   "label": "Mata Leão",     "active": true  },
+              { "id": "child-top-src-chave-braco",  "label": "Chave de Braço","active": true  }
+            ]
+          },
+          {
+            "id":        "uuid-db-mount-bottom",
+            "nodeType":  "position",
+            "label":     "Por Baixo",
+            "externalId":"mount/bottom",
+            "outputs": [
+              { "id": "child-bot-src-raspagem", "label": "Raspagem Elefante", "active": false }
+            ]
+          }
+        ]
+      }
+    }
+
+  ],
+
+  "edges": [
+
+    // ── Edge saindo de nó simples ────────────────────────────────
+    {
+      "id": "edge-uuid-1",
+      "source":       "uuid-db-node",
+      "sourceHandle": "src-berimbolo",    // id do output do card de origem
+      "target":       "uuid-db-berimbolo",
+      "targetHandle": "target",           // handle único de entrada do destino
+      "type": "bjjEdge",
+      "data": {
+        "edgeType": "transition",         // transition | submission_from | part_of_system
+        "active": true
+      }
+    },
+
+    // ── Edge entrando em filho de grupo ──────────────────────────
+    {
+      "id": "edge-uuid-2",
+      "source":       "uuid-db-node",
+      "sourceHandle": "src-raspagem",
+      "target":       "uuid-db-mount",               // id do NÓ PAI
+      "targetHandle": "child-uuid-db-mount-top-in",  // handle do filho específico
+      "type": "bjjEdge",
+      "data": {
+        "edgeType": "transition",
+        "active": false
+      }
+    }
+
+  ]
+}</pre>
+
+<p style="margin-top:24px;font-size:12px;color:#9CA3AF">
+  Handles de entrada: <code style="background:#F3F4F6;padding:2px 6px;border-radius:4px">target</code> (nó simples),
+  <code style="background:#F3F4F6;padding:2px 6px;border-radius:4px">group-target</code> (no pai do grupo),
+  <code style="background:#F3F4F6;padding:2px 6px;border-radius:4px">child-{childId}-in</code> (em filho do grupo).
+  <br/>
+  Handles de saída: um por linha de output, id gerado a partir da edge de destino.
+</p>
+
+</body>
+</html>
