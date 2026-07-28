@@ -1,8 +1,21 @@
-import React, { useState, useMemo, useRef, useEffect } from 'react'
+import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { MultiDirectedGraph } from 'graphology'
 import type { NodeAttrs, EdgeAttrs } from '../types'
+import type { DocumentData } from '../core/document/types'
+import type { ManualEdge } from '../lib/persistence'
 import { useLang, t, type Lang } from '../lib/i18n'
+import { NodeIcon, iconColor } from './NodeIcon'
+import { serializeFluxograma, deserializeFluxograma } from '../modes/fluxograma/serializer'
+import { resolveToParent, buildParentByChildId } from '../lib/graphUtils'
 
+
+function uid(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = Math.random() * 16 | 0
+    return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16)
+  })
+}
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -78,6 +91,11 @@ function findMirror(graph: MultiDirectedGraph, nodeId: string): FightPos | null 
   return found
 }
 
+/** Para posições standalone (sem espelho), retorna a própria posição — ambos os lutadores compartilham o mesmo nó. */
+function mirrorOrSelf(graph: MultiDirectedGraph, pos: FightPos): FightPos {
+  return findMirror(graph, pos.nodeId) ?? pos
+}
+
 function splitPosName(name: string, lang: Lang = 'pt'): { base: string; side: string | null } {
   if (lang === 'en') {
     if (name.endsWith(' Top'))    return { base: name.slice(0, -4),  side: 'Top'    }
@@ -120,14 +138,14 @@ function persistAll(flows: SavedFlow[]) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(flows))
 }
 
-// ── start position constants ──────────────────────────────────────────────────
+// ── start position helpers ────────────────────────────────────────────────────
 
-const KNEELING_POS: FightPos = {
-  nodeId: 'kneeling',
-  name: 'Rola de Treino',
-  name_en: 'Training Roll',
-  nodeType: 'position',
-  parentExtId: null,
+function findByExtId(graph: MultiDirectedGraph, extId: string): FightPos | null {
+  let found: FightPos | null = null
+  graph.forEachNode((id, a) => {
+    if ((a as NodeAttrs).external_id === extId) found = nodePos(graph, id)
+  })
+  return found
 }
 
 // ── node search ───────────────────────────────────────────────────────────────
@@ -143,6 +161,16 @@ function NodeSearch({ graph, placeholder, onSelect, autoFocus }: {
   const ref = useRef<HTMLInputElement>(null)
   useEffect(() => { if (autoFocus) ref.current?.focus() }, [autoFocus])
 
+  // external_ids que têm filhos (para resolver parent → /top ao selecionar)
+  const parentExtIds = useMemo(() => {
+    const s = new Set<string>()
+    graph.forEachNode((_, a) => {
+      const parentExtId = (a as NodeAttrs).parent_external_id
+      if (parentExtId) s.add(parentExtId)
+    })
+    return s
+  }, [graph])
+
   const results = useMemo(() => {
     if (q.length < 2) return []
     const lq = q.toLowerCase()
@@ -150,15 +178,37 @@ function NodeSearch({ graph, placeholder, onSelect, autoFocus }: {
     graph.forEachNode((id, a) => {
       const na = a as NodeAttrs
       if (na.node_type === 'transition') return
+      const ext = na.external_id ?? ''
       if (na.node_type === 'position') {
-        const ext = na.external_id ?? ''
-        if (!ext.endsWith('/top') && !ext.endsWith('/bottom')) return
+        // Mostrar group parents e standalone; ocultar filhos (/top e /bottom)
+        if (ext.endsWith('/top') || ext.endsWith('/bottom')) return
+      }
+      if (na.node_type === 'submission') {
+        // Ocultar submission group parents — só filhos específicos e standalones são selecionáveis
+        if (!na.parent_external_id && parentExtIds.has(ext)) return
       }
       const displayName = lang === 'en' ? (na.name_en ?? na.name) : na.name
       if (displayName.toLowerCase().includes(lq)) out.push(nodePos(graph, id))
     })
     return out.sort((a, b) => posDisplayName(a, lang).localeCompare(posDisplayName(b, lang))).slice(0, 20)
-  }, [graph, q])
+  }, [graph, q, parentExtIds])
+
+  function handleSelect(pos: FightPos) {
+    const ext = graph.hasNode(pos.nodeId)
+      ? ((graph.getNodeAttributes(pos.nodeId) as NodeAttrs).external_id ?? '')
+      : ''
+    if (parentExtIds.has(ext)) {
+      // Group parent → resolve para /top; mirrorOrSelf atribui /bottom ao outro lutador
+      const topExt = ext + '/top'
+      let topPos: FightPos | null = null
+      graph.forEachNode((id, a) => {
+        if ((a as NodeAttrs).external_id === topExt) topPos = nodePos(graph, id)
+      })
+      if (topPos) { onSelect(topPos); setQ(''); return }
+    }
+    onSelect(pos)
+    setQ('')
+  }
 
   return (
     <div className="flow-search-wrap">
@@ -168,7 +218,7 @@ function NodeSearch({ graph, placeholder, onSelect, autoFocus }: {
         <ul className="search-dropdown">
           {results.map(r => (
             <li key={r.nodeId}>
-              <span onClick={() => { onSelect(r); setQ('') }}>
+              <span onClick={() => handleSelect(r)}>
                 <span className={`type-dot ${r.nodeType}`} />{posDisplayName(r, lang)}
               </span>
             </li>
@@ -308,14 +358,202 @@ function GptImportModal({ text, err, onTextChange, onSubmit, onClose }: {
   )
 }
 
+// ── exported types ────────────────────────────────────────────────────────────
+
+export type { SavedFlow, FightStep, FightPos, Attempt, Actor }
+
+// ── extract mindmap from flow ─────────────────────────────────────────────────
+
+function extractMindmap(
+  flow: SavedFlow,
+  actor: Actor,
+  graph: MultiDirectedGraph
+): { rootId: string | null; activeEdges: Set<string>; extraNodes: Set<string>; manualEdges: ManualEdge[] } {
+  const activeEdges    = new Set<string>()
+  const extraNodes     = new Set<string>()
+  const manualEdges: ManualEdge[] = []
+  const parentByChild  = buildParentByChildId(graph)
+
+  // Mapa inverso: parent → [leaf children]  (para resolver group parents sem filho específico)
+  const leafChildrenByParent = new Map<string, string[]>()
+  graph.forEachNode((id, attrs) => {
+    const parentExt = (attrs as NodeAttrs).parent_external_id
+    if (!parentExt) return
+    let parentId: string | undefined
+    graph.forEachNode((pid, pa) => { if ((pa as NodeAttrs).external_id === parentExt) parentId = pid })
+    if (!parentId) return
+    if (!leafChildrenByParent.has(parentId)) leafChildrenByParent.set(parentId, [])
+    leafChildrenByParent.get(parentId)!.push(id)
+  })
+
+  function nodeTypeOf(id: string): string {
+    return graph.hasNode(id) ? (graph.getNodeAttributes(id) as NodeAttrs).node_type : ''
+  }
+
+  /**
+   * Retorna o nó canvas (source) e o handle correto para uma aresta SAINDO de nodeId.
+   * parentId = resolveToParent(nodeId) — já calculado pelo chamador.
+   * isFailure: se true, usa handle de falha (apenas para técnicas).
+   */
+  function sourceFor(
+    nodeId: string,
+    parentId: string,
+    isFailure = false,
+  ): { source: string; sourceHandle?: string } {
+    if (nodeId !== parentId) {
+      // nodeId é filho dentro de um group card
+      const nt = nodeTypeOf(nodeId)
+      const suffix = nt === 'submission'
+        ? (isFailure ? 'falha' : 'sucesso')
+        : 'out'                           // position child → '-out'
+      return { source: parentId, sourceHandle: `child-${nodeId}-${suffix}` }
+    }
+    // nodeId é o próprio nó canvas (standalone ou group parent)
+    const nt = nodeTypeOf(nodeId)
+    if (nt === 'transition' || nt === 'submission') {
+      return { source: nodeId, sourceHandle: isFailure ? 'falha' : 'sucesso' }
+    }
+    if (nt === 'position') {
+      const children = leafChildrenByParent.get(nodeId)
+      if (children && children.length > 0) {
+        // group parent de posição → sair pelo primeiro filho
+        return { source: nodeId, sourceHandle: `child-${children[0]}-out` }
+      }
+      return { source: nodeId, sourceHandle: 'depois' }  // standalone position
+    }
+    return { source: nodeId }
+  }
+
+  /**
+   * Retorna o nó canvas (target) e o handle correto para uma aresta CHEGANDO em nodeId.
+   * parentId = resolveToParent(nodeId) — já calculado pelo chamador.
+   */
+  function targetFor(
+    nodeId: string,
+    parentId: string,
+  ): { target: string; targetHandle?: string } {
+    if (nodeId !== parentId) {
+      // nodeId é filho dentro de um group card
+      return { target: parentId, targetHandle: `child-${nodeId}-in` }
+    }
+    // nodeId é o próprio nó canvas (standalone ou group parent)
+    const nt = nodeTypeOf(nodeId)
+    if (nt === 'transition' || nt === 'submission' || nt === 'position') {
+      const children = leafChildrenByParent.get(nodeId)
+      if (children && children.length > 0) {
+        // group parent → entrar pelo primeiro filho
+        return { target: nodeId, targetHandle: `child-${children[0]}-in` }
+      }
+      return { target: nodeId, targetHandle: 'antes' }  // standalone → handle 'antes'
+    }
+    return { target: nodeId }
+  }
+
+  if (!flow.steps.length) return { rootId: null, activeEdges, extraNodes, manualEdges }
+
+  const firstPos = actor === 'A' ? flow.steps[0].posA : flow.steps[0].posB
+  const rawRoot  = firstPos && firstPos.nodeId !== 'custom' && graph.hasNode(firstPos.nodeId)
+    ? firstPos.nodeId : null
+  if (!rawRoot) return { rootId: null, activeEdges, extraNodes, manualEdges }
+
+  // Sempre resolver para o group card pai
+  const rootId = resolveToParent(rawRoot, parentByChild)
+
+  for (let i = 0; i < flow.steps.length; i++) {
+    const step    = flow.steps[i]
+    const posNode = actor === 'A' ? step.posA : step.posB
+    if (!posNode || posNode.nodeId === 'custom' || !graph.hasNode(posNode.nodeId)) continue
+
+    const posParent = resolveToParent(posNode.nodeId, parentByChild)
+    if (posParent !== rootId) extraNodes.add(posParent)
+
+    for (const attempt of step.attempts) {
+      if (attempt.actor !== actor) continue
+      if (!attempt.transNodeId || attempt.transNodeId === 'custom' || !graph.hasNode(attempt.transNodeId)) continue
+
+      const techParentId = parentByChild.get(attempt.transNodeId)
+
+      // Sempre adicionar a técnica como extra node — mantém o card visível mesmo se a aresta for desativada
+      extraNodes.add(techParentId ?? attempt.transNodeId)
+
+      // position → technique (via aresta do grafo)
+      let edgeFound = false
+      graph.forEachOutEdge(posNode.nodeId, (edgeId, _a, _s, target) => {
+        if (target === attempt.transNodeId) { activeEdges.add(edgeId); edgeFound = true }
+      })
+
+      if (!edgeFound) {
+        // Sequência não prevista no banco: criar conexão manual posição→técnica
+        const { source: posSrc, sourceHandle: posSrcHandle } =
+          sourceFor(posNode.nodeId, posParent)
+        const { target: techTgt, targetHandle: techTgtHandle } =
+          targetFor(attempt.transNodeId, techParentId ?? attempt.transNodeId)
+        manualEdges.push({
+          id: `flow-manual-${attempt.id}`,
+          source: posSrc,
+          target: techTgt,
+          ...(posSrcHandle  ? { sourceHandle: posSrcHandle  } : {}),
+          ...(techTgtHandle ? { targetHandle: techTgtHandle } : {}),
+        })
+      }
+
+      // technique → next position (if success)
+      if (attempt.result === 'success' && i + 1 < flow.steps.length) {
+        const nextPos = actor === 'A' ? flow.steps[i + 1].posA : flow.steps[i + 1].posB
+        if (nextPos && nextPos.nodeId !== 'custom' && graph.hasNode(nextPos.nodeId)) {
+          let foundTechToNext = false
+          graph.forEachOutEdge(attempt.transNodeId, (edgeId, _a, _s, target) => {
+            if (target === nextPos.nodeId) { activeEdges.add(edgeId); foundTechToNext = true }
+          })
+          const nextParent = resolveToParent(nextPos.nodeId, parentByChild)
+          if (nextParent !== rootId) extraNodes.add(nextParent)
+
+          if (!foundTechToNext) {
+            // Aresta técnica→próxima posição não existe no grafo: criar conexão manual
+            const { source: techSrc, sourceHandle: techSrcHandle } =
+              sourceFor(attempt.transNodeId, techParentId ?? attempt.transNodeId, false)
+            const { target: nextTgt, targetHandle: nextTgtHandle } =
+              targetFor(nextPos.nodeId, nextParent)
+            manualEdges.push({
+              id: `flow-manual-dest-${attempt.id}`,
+              source: techSrc,
+              target: nextTgt,
+              ...(techSrcHandle ? { sourceHandle: techSrcHandle } : {}),
+              ...(nextTgtHandle ? { targetHandle: nextTgtHandle } : {}),
+            })
+          }
+        }
+      }
+    }
+  }
+
+  return { rootId, activeEdges, extraNodes, manualEdges }
+}
+
 // ── main component ────────────────────────────────────────────────────────────
 
-export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | null }) {
+export default function FlowBuilder({
+  graph,
+  onOpenAsMindmap,
+  initialData,
+  onDataChange,
+}: {
+  graph:            MultiDirectedGraph | null
+  onOpenAsMindmap?: (rootId: string, activeEdges: Set<string>, extraNodes: Set<string>, manualEdges: ManualEdge[]) => void
+  initialData?:     DocumentData
+  onDataChange?:    (data: DocumentData) => void
+}) {
+  const navigate = useNavigate()
   const lang = useLang()
-  const [steps, setSteps]         = useState<FightStep[]>([])
-  const [nameA, setNameA]         = useState('Lutador A')
-  const [nameB, setNameB]         = useState('Lutador B')
-  const [flowName, setFlowName]   = useState('Novo fluxo')
+
+  // Seed initial state from DocumentData when in doc mode
+  const docInitial = initialData && initialData.nodes.length > 0
+    ? deserializeFluxograma(initialData) : null
+
+  const [steps, setSteps]         = useState<FightStep[]>(docInitial?.steps ?? [])
+  const [nameA, setNameA]         = useState(docInitial?.nameA ?? 'Lutador A')
+  const [nameB, setNameB]         = useState(docInitial?.nameB ?? 'Lutador B')
+  const [flowName, setFlowName]   = useState(docInitial?.flowName ?? 'Novo fluxo')
   const [panel, setPanel]         = useState<PanelPhase>({ type: 'idle' })
   const [savedFlows, setSaved]    = useState<SavedFlow[]>(loadSaved)
   const [showSaved, setShowSaved] = useState(false)
@@ -346,37 +584,38 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
   // ── flow actions ──────────────────────────────────────────
 
   function startFlow(posA: FightPos) {
-    const posB = graph ? findMirror(graph, posA.nodeId) : null
-    setSteps([{ id: crypto.randomUUID(), posA, posB, attempts: [] }])
+    const posB = graph ? mirrorOrSelf(graph, posA) : posA
+    setSteps([{ id: uid(), posA, posB, attempts: [] }])
     setEditingCardId(null)
     setPanel({ type: 'idle' })
   }
 
   function handleStartStanding() {
     if (!graph) return
-    let standingPos: FightPos | null = null
-    graph.forEachNode((id, a) => {
-      if ((a as NodeAttrs).external_id === 'standing-position/top') standingPos = nodePos(graph, id)
-    })
-    if (standingPos) startFlow(standingPos)
+    const pos = findByExtId(graph, 'standing-position')
+    if (pos) startFlow(pos)
   }
 
   function handleStartKneeling() {
-    setSteps([{ id: crypto.randomUUID(), posA: KNEELING_POS, posB: KNEELING_POS, attempts: [] }])
+    if (!graph) return
+    const pos = findByExtId(graph, 'training-roll')
+    if (!pos) return
+    // Both sides start from Training Roll (neutral start)
+    setSteps([{ id: uid(), posA: pos, posB: pos, attempts: [] }])
     setEditingCardId(null)
     setPanel({ type: 'idle' })
   }
 
   function changeStepPos(stepId: string, newPosA: FightPos) {
     if (!graph) return
-    const posB = findMirror(graph, newPosA.nodeId)
+    const posB = mirrorOrSelf(graph, newPosA)
     setSteps(prev => prev.map(s => s.id === stepId ? { ...s, posA: newPosA, posB } : s))
     setEditingCardId(null)
   }
 
   function insertStep(idx: number, posA: FightPos) {
-    const posB = graph ? findMirror(graph, posA.nodeId) : null
-    const newStep: FightStep = { id: crypto.randomUUID(), posA, posB, attempts: [] }
+    const posB = graph ? mirrorOrSelf(graph, posA) : posA
+    const newStep: FightStep = { id: uid(), posA, posB, attempts: [] }
     setSteps(prev => { const a = [...prev]; a.splice(idx, 0, newStep); return a })
     setPanel({ type: 'idle' })
   }
@@ -423,15 +662,15 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
   function commitSuccess(actor: Actor, trans: FightPos, dest: FightPos) {
     if (!graph) return
     const attempt: Attempt = {
-      id: crypto.randomUUID(), actor,
+      id: uid(), actor,
       transNodeId: trans.nodeId === 'custom' ? null : trans.nodeId,
       transName: posDisplayName(trans, lang), result: 'success',
     }
-    const mirror = findMirror(graph, dest.nodeId)
+    const mirror = mirrorOrSelf(graph, dest)
     const newStep: FightStep = {
-      id: crypto.randomUUID(),
-      posA: actor === 'A' ? dest : (mirror ?? currentStep?.posA ?? dest),
-      posB: actor === 'A' ? (mirror ?? currentStep?.posB ?? null) : dest,
+      id: uid(),
+      posA: actor === 'A' ? dest  : mirror,
+      posB: actor === 'A' ? mirror : dest,
       attempts: [],
     }
     setSteps(prev => {
@@ -444,13 +683,33 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
     setTimeout(() => timelineRef.current?.scrollTo({ top: 99999, behavior: 'smooth' }), 50)
   }
 
+  function handlePositionPick(pos: FightPos, actor: Actor) {
+    if (!graph) return
+    const mirror = mirrorOrSelf(graph, pos)
+    const newStep: FightStep = {
+      id: uid(),
+      posA: actor === 'A' ? pos   : mirror,
+      posB: actor === 'A' ? mirror : pos,
+      attempts: [],
+    }
+    setSteps(prev => prev.length ? [...prev, newStep] : prev)
+    setPanel({ type: 'idle' })
+    setCustomText('')
+    setTimeout(() => timelineRef.current?.scrollTo({ top: 99999, behavior: 'smooth' }), 50)
+  }
+
   function handleTransPick(trans: FightPos, actor: Actor) {
     setPanel({ type: 'pick-result', actor, trans })
   }
 
+  function handleNodePick(item: FightPos, actor: Actor) {
+    if (item.nodeType === 'position') handlePositionPick(item, actor)
+    else handleTransPick(item, actor)
+  }
+
   function handleResultPick(result: 'success' | 'failure', actor: Actor, trans: FightPos) {
     if (result === 'failure') {
-      appendAttempt({ id: crypto.randomUUID(), actor, transNodeId: trans.nodeId === 'custom' ? null : trans.nodeId, transName: posDisplayName(trans, lang), result: 'failure' })
+      appendAttempt({ id: uid(), actor, transNodeId: trans.nodeId === 'custom' ? null : trans.nodeId, transName: posDisplayName(trans, lang), result: 'failure' })
       setPanel({ type: 'after-failure', actor })
       setCustomText('')
       return
@@ -469,7 +728,7 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
 
   function handleCustomFailAdd(actor: Actor) {
     if (!customText.trim()) return
-    appendAttempt({ id: crypto.randomUUID(), actor, transNodeId: null, transName: customText.trim(), result: 'failure' })
+    appendAttempt({ id: uid(), actor, transNodeId: null, transName: customText.trim(), result: 'failure' })
     setCustomText('')
   }
 
@@ -478,7 +737,7 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
   function saveFlow() {
     if (!steps.length) return
     const flow: SavedFlow = {
-      id: crypto.randomUUID(), name: flowName, nameA, nameB,
+      id: uid(), name: flowName, nameA, nameB,
       steps, savedAt: new Date().toISOString(),
     }
     const updated = [...savedFlows, flow]
@@ -493,6 +752,13 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
   function deleteFlow(id: string) {
     const updated = savedFlows.filter(f => f.id !== id)
     setSaved(updated); persistAll(updated)
+  }
+
+  function openAsMindmap(flow: SavedFlow, actor: Actor) {
+    if (!graph || !onOpenAsMindmap) return
+    const { rootId, activeEdges, extraNodes, manualEdges } = extractMindmap(flow, actor, graph)
+    if (!rootId) return
+    onOpenAsMindmap(rootId, activeEdges, extraNodes, manualEdges)
   }
 
   // ── GPT import ───────────────────────────────────────────
@@ -515,10 +781,10 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
       if (s.tipo === 'position') {
         const pos = nameToNode.get(s.nome) ?? { nodeId: `custom-${s.nome}`, name: s.nome, name_en: null, nodeType: 'position', parentExtId: null }
         const mirror = nameToNode.has(s.nome) ? findMirror(graph, pos.nodeId) : null
-        newSteps.push({ id: crypto.randomUUID(), posA: pos, posB: mirror, attempts: [] })
+        newSteps.push({ id: uid(), posA: pos, posB: mirror, attempts: [] })
       } else if ((s.tipo === 'submission' || s.tipo === 'transition') && newSteps.length > 0) {
         newSteps[newSteps.length - 1].attempts.push({
-          id: crypto.randomUUID(),
+          id: uid(),
           actor: 'A',
           transNodeId: nameToNode.get(s.nome)?.nodeId ?? null,
           transName: s.nome,
@@ -545,6 +811,37 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
     }
   }, [graph, currentStep])
 
+  const allGraphNodes = useMemo<FightPos[]>(() => {
+    if (!graph) return []
+    // Detectar submission group parents (têm filhos submission)
+    const submissionParentExtIds = new Set<string>()
+    graph.forEachNode((_, a) => {
+      const na = a as NodeAttrs
+      if (na.node_type === 'submission' && na.parent_external_id) {
+        submissionParentExtIds.add(na.parent_external_id)
+      }
+    })
+    const out: FightPos[] = []
+    graph.forEachNode((id, attrs) => {
+      const a = attrs as NodeAttrs
+      const ext = a.external_id ?? ''
+      // Excluir filhos de posição (/top e /bottom)
+      if (a.node_type === 'position' && (ext.endsWith('/top') || ext.endsWith('/bottom'))) return
+      // Excluir submission group parents — apenas filhos específicos e standalones
+      if (a.node_type === 'submission' && !a.parent_external_id && submissionParentExtIds.has(ext)) return
+      out.push({ nodeId: id, name: a.name, name_en: a.name_en ?? null, nodeType: a.node_type, parentExtId: a.parent_external_id ?? null })
+    })
+    return out.sort((a, b) => a.name.localeCompare(b.name))
+  }, [graph])
+
+  // ── doc mode: emit changes to parent ─────────────────────────
+  const emitDocChange = useCallback(() => {
+    if (!onDataChange) return
+    onDataChange(serializeFluxograma(steps, nameA, nameB, flowName))
+  }, [onDataChange, steps, nameA, nameB, flowName])
+
+  useEffect(() => { emitDocChange() }, [emitDocChange])
+
   const activeActor: Actor | null =
     panel.type === 'pick-trans' || panel.type === 'pick-result' ||
     panel.type === 'after-failure' || panel.type === 'custom-success' ||
@@ -565,12 +862,15 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
           <input className="flow-name-input" value={nameB} onChange={e => setNameB(e.target.value)} placeholder={t('flow.fighter_b', lang)} />
         </div>
         <h3 className="flow-start-title">{t('flow.how_start', lang)}</h3>
+        {!graph && (
+          <p style={{ fontSize: 12, color: '#9CA3AF', marginBottom: 8 }}>Carregando grafo…</p>
+        )}
         <div className="flow-start-btns">
-          <button className="flow-start-type-btn" onClick={handleStartStanding}>
+          <button className="flow-start-type-btn" onClick={handleStartStanding} disabled={!graph} style={{ opacity: graph ? 1 : 0.4 }}>
             <span className="flow-start-type-label">{t('flow.standing', lang)}</span>
             <span className="flow-start-type-sub">{t('flow.standing_sub', lang)}</span>
           </button>
-          <button className="flow-start-type-btn" onClick={handleStartKneeling}>
+          <button className="flow-start-type-btn" onClick={handleStartKneeling} disabled={!graph} style={{ opacity: graph ? 1 : 0.4 }}>
             <span className="flow-start-type-label">{t('flow.kneeling', lang)}</span>
             <span className="flow-start-type-sub">{t('flow.kneeling_sub', lang)}</span>
           </button>
@@ -589,9 +889,15 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
             {showSaved && (
               <div className="flow2-saved-list">
                 {savedFlows.map(f => (
-                  <div key={f.id} className="flow2-saved-item">
+                  <div key={f.id} className="flow2-saved-item" style={{ flexWrap: 'wrap', gap: 4 }}>
                     <span onClick={() => loadFlow(f)} className="flow2-saved-name">{f.name}</span>
                     <span className="flow2-saved-date">{new Date(f.savedAt).toLocaleDateString('pt-BR')}</span>
+                    {onOpenAsMindmap && (
+                      <>
+                        <button className="flow2-map-btn" onClick={() => openAsMindmap(f, 'A')} title={`Ver mapa de ${f.nameA}`}>⬡ {f.nameA}</button>
+                        <button className="flow2-map-btn" onClick={() => openAsMindmap(f, 'B')} title={`Ver mapa de ${f.nameB}`}>⬡ {f.nameB}</button>
+                      </>
+                    )}
                     <button className="flow2-saved-del" onClick={() => deleteFlow(f.id)}>✕</button>
                   </div>
                 ))}
@@ -624,13 +930,23 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
 
       {/* Header */}
       <div className="flow2-header">
+        {onDataChange && (
+          <button
+            className="btn-reset"
+            style={{ color: 'var(--muted)', fontSize: 12 }}
+            onClick={() => navigate('/docs')}
+          >← Docs</button>
+        )}
         <input className="flow2-name-input" value={flowName} onChange={e => setFlowName(e.target.value)} />
         <div className="flow-names-row" style={{ gap: 6 }}>
           <input className="flow-name-input compact" value={nameA} onChange={e => setNameA(e.target.value)} />
           <span style={{ fontSize: 11, color: 'var(--muted)' }}>vs</span>
           <input className="flow-name-input compact" value={nameB} onChange={e => setNameB(e.target.value)} />
         </div>
-        <button className="btn-reset" onClick={saveFlow}>{t('flow.save', lang)}</button>
+        {onDataChange
+          ? <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>auto-save</span>
+          : <button className="btn-reset" onClick={saveFlow}>{t('flow.save', lang)}</button>
+        }
         <div style={{ position: 'relative' }}>
           <button className="btn-reset" onClick={() => setShowSaved(s => !s)}>
             {t('flow.saved', lang)} ({savedFlows.length})
@@ -640,9 +956,15 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
               {savedFlows.length === 0
                 ? <div className="flow2-saved-item"><span className="flow2-saved-name" style={{ color: 'var(--muted)' }}>{t('flow.none_saved', lang)}</span></div>
                 : savedFlows.map(f => (
-                  <div key={f.id} className="flow2-saved-item">
+                  <div key={f.id} className="flow2-saved-item" style={{ flexWrap: 'wrap', gap: 4 }}>
                     <span onClick={() => loadFlow(f)} className="flow2-saved-name">{f.name}</span>
                     <span className="flow2-saved-date">{new Date(f.savedAt).toLocaleDateString('pt-BR')}</span>
+                    {onOpenAsMindmap && (
+                      <>
+                        <button className="flow2-map-btn" onClick={() => openAsMindmap(f, 'A')} title={`Ver mapa de ${f.nameA}`}>⬡ {f.nameA}</button>
+                        <button className="flow2-map-btn" onClick={() => openAsMindmap(f, 'B')} title={`Ver mapa de ${f.nameB}`}>⬡ {f.nameB}</button>
+                      </>
+                    )}
                     <button className="flow2-saved-del" onClick={() => deleteFlow(f.id)}>✕</button>
                   </div>
                 ))}
@@ -721,9 +1043,7 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
                             <div className="mc-pos-col-divider" />
                             <div className="mc-pos-col">
                               <span className="mc-fighter-tag B">{nameB}</span>
-                              <span className="mc-col-side">
-                                {step.posB ? (sideB ?? posDisplayName(step.posB, lang)) : <em style={{ color: 'var(--muted)', fontStyle: 'italic' }}>{t('flow.no_mirror', lang)}</em>}
-                              </span>
+                              <span className="mc-col-side">{step.posB ? (sideB ?? posDisplayName(step.posB, lang)) : posDisplayName(step.posA, lang)}</span>
                             </div>
                           </div>
                         </>
@@ -784,7 +1104,6 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
                         <button
                           className={`mc-add-btn${activeActor === 'B' ? ' active-B' : ''}`}
                           onClick={() => setPanel(activeActor === 'B' ? { type: 'idle' } : { type: 'pick-trans', actor: 'B' })}
-                          disabled={!step.posB}
                         >+ {nameB}</button>
                       </div>
                     </div>
@@ -817,6 +1136,13 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
               const actor = panel.actor
               const list = transListFor(actor)
               const fromPos = actor === 'A' ? currentStep.posA : currentStep.posB
+              const q = customText.toLowerCase().trim()
+              const searchResults = q.length > 0
+                ? allGraphNodes.filter(n =>
+                    n.name.toLowerCase().includes(q) ||
+                    (n.name_en ?? '').toLowerCase().includes(q)
+                  ).slice(0, 12)
+                : []
               return (
                 <>
                   <div className="flow2-panel-header">
@@ -829,31 +1155,50 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
                     <p className="flow2-panel-sub" style={{ color: '#ef4444' }}>{t('flow.failed_next', lang)}</p>
                   )}
                   <p className="flow2-panel-sub">{t('flow.from', lang)} <strong>{fromPos ? posDisplayName(fromPos, lang) : '—'}</strong></p>
-                  <GroupedTechList items={list} extIdToName={extIdToName} onPick={t => handleTransPick(t, actor)} />
-                  <div className="flow2-custom-section">
-                    <p className="flow2-custom-label">{t('flow.outside_list', lang)}</p>
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <input
-                        className="search-input"
-                        placeholder={t('flow.tech_name', lang)}
-                        value={customText}
-                        onChange={e => setCustomText(e.target.value)}
-                        onKeyDown={e => { if (e.key === 'Enter') handleCustomSubmit(actor) }}
-                      />
-                      <button
-                        className="flow2-result-btn success"
-                        style={{ flexShrink: 0, padding: '4px 10px' }}
-                        onClick={() => handleCustomSubmit(actor)}
-                        title={t('flow.choose_result', lang)}
-                      >→</button>
-                      <button
-                        className="flow2-result-btn failure"
-                        style={{ flexShrink: 0, padding: '4px 10px' }}
-                        onClick={() => handleCustomFailAdd(actor)}
-                        title={t('flow.reg_failure', lang)}
-                      >✗</button>
-                    </div>
+
+                  {/* Search input at top */}
+                  <div className="flow2-panel-search">
+                    <input
+                      className="flow2-search-input"
+                      placeholder={t('flow.tech_name', lang)}
+                      value={customText}
+                      autoFocus
+                      onChange={e => setCustomText(e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && searchResults.length === 0) handleCustomSubmit(actor) }}
+                    />
+                    {customText.trim() && (
+                      <div className="flow2-search-btns">
+                        <button
+                          className="flow2-result-btn success"
+                          style={{ flexShrink: 0, padding: '4px 10px' }}
+                          onClick={() => handleCustomSubmit(actor)}
+                          title={t('flow.choose_result', lang)}
+                        >→</button>
+                        <button
+                          className="flow2-result-btn failure"
+                          style={{ flexShrink: 0, padding: '4px 10px' }}
+                          onClick={() => handleCustomFailAdd(actor)}
+                          title={t('flow.reg_failure', lang)}
+                        >✗</button>
+                      </div>
+                    )}
                   </div>
+
+                  {/* Search results or contextual list */}
+                  {searchResults.length > 0 ? (
+                    <div className="flow-grouped-list">
+                      {searchResults.map(item => (
+                        <div key={item.nodeId} className="flow-option flow-option-search" onClick={() => { setCustomText(''); handleNodePick(item, actor) }}>
+                          <span className="search-type-icon" style={{ background: iconColor(item.nodeType), width: 24, height: 24, borderRadius: '50%', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <NodeIcon type={item.nodeType} size={11} />
+                          </span>
+                          <span className="flow-option-name">{posDisplayName(item, lang)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <GroupedTechList items={list} extIdToName={extIdToName} onPick={item => handleNodePick(item, actor)} />
+                  )}
                 </>
               )
             })()}
@@ -898,6 +1243,11 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
                     </li>
                   ))}
                 </ul>
+                <div className="flow2-custom-section" style={{ marginTop: 8 }}>
+                  <p className="flow2-custom-label">{t('flow.other_dest', lang)}</p>
+                  <NodeSearch graph={graph!} placeholder={t('flow.search_dest', lang)}
+                    onSelect={dest => commitSuccess(panel.actor, panel.trans, dest)} />
+                </div>
               </>
             )}
 
@@ -917,7 +1267,7 @@ export default function FlowBuilder({ graph }: { graph: MultiDirectedGraph | nul
                     <input className="search-input" placeholder="Posição..." value={successText} onChange={e => setSuccessText(e.target.value)} />
                     <button className="flow2-result-btn success" style={{ flexShrink: 0, padding: '4px 8px' }} onClick={() => {
                       if (!successText.trim() || !panel.trans) return
-                      appendAttempt({ id: crypto.randomUUID(), actor: panel.actor, transNodeId: panel.trans.nodeId === 'custom' ? null : panel.trans.nodeId, transName: posDisplayName(panel.trans, lang), result: 'success', note: `→ ${successText}` })
+                      appendAttempt({ id: uid(), actor: panel.actor, transNodeId: panel.trans.nodeId === 'custom' ? null : panel.trans.nodeId, transName: posDisplayName(panel.trans, lang), result: 'success', note: `→ ${successText}` })
                       setPanel({ type: 'idle' }); setSuccessText('')
                     }}>OK</button>
                   </div>

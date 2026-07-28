@@ -11,6 +11,7 @@ import {
   type NodeTypes, type EdgeTypes, type InternalNode,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
+import { NodeIcon, iconColor } from './NodeIcon'
 
 // ─── exported types (same contract as GraphCanvas) ─────────────────────────
 
@@ -63,52 +64,12 @@ const C = dark ? {
   muted: '#64748b', mutedBg: '#e2e8f0', closeColor: '#94a3b8',
 }
 
-// icon color per node type
-const ICON_COLOR: Record<string, string> = {
-  position:   '#2E77FF',
-  transition: '#8B5CF6',
-  submission: '#EF4444',
-  principle:  '#10B981',
-  system:     '#7c3aed',
-}
-function iconColor(type: string) { return ICON_COLOR[type] ?? '#8B5CF6' }
-
 // edge color helpers
 function edgeColor(state: 'active' | 'latent', isSubmission: boolean, edgeType?: string): string {
   if (state === 'latent') return C.edgeLatent
   if (isSubmission) return C.edgeSubmission
   if (edgeType === 'part_of_system') return C.edgeSystem
   return C.edgeActive
-}
-
-// ─── node type icon ───────────────────────────────────────────────────────
-
-function NodeIcon({ type, size = 12 }: { type: string; size?: number }) {
-  const sw = size <= 10 ? 2.5 : 2
-  const common = { stroke: '#fff', fill: 'none' as const, strokeWidth: sw, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const }
-  if (type === 'position') return (
-    <svg viewBox="0 0 24 24" width={size} height={size} {...common}>
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-    </svg>
-  )
-  if (type === 'submission') return (
-    <svg viewBox="0 0 24 24" width={size} height={size} {...common}>
-      <circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>
-    </svg>
-  )
-  if (type === 'principle') return (
-    <svg viewBox="0 0 24 24" width={size} height={size} {...common}>
-      <path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.48 19 2c1 2 2 4.18 2 8 0 5.5-4.78 10-10 10z"/>
-      <path d="M2 21c0-3 1.85-5.36 5.08-6C9.5 14.52 12 13 13 12"/>
-    </svg>
-  )
-  // transition / system / default
-  return (
-    <svg viewBox="0 0 24 24" width={size} height={size} {...common}>
-      <path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/>
-      <path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/>
-    </svg>
-  )
 }
 
 // ─── BjjNode ─────────────────────────────────────────────────────────────
@@ -126,6 +87,25 @@ interface BjjNodeData extends Record<string, unknown> {
 }
 
 const H: React.CSSProperties = { opacity: 0, width: 6, height: 6 }
+
+// ── shared handle styles ──────────────────────────────────────────────────
+
+const dotHandleBase: React.CSSProperties = { width: 10, height: 10, border: `2px solid ${C.cardBg}` }
+const grayDot  = dark ? '#4b5563' : '#9CA3AF'
+const inHandle  = (top = '50%'): React.CSSProperties => ({ ...dotHandleBase, top, left: -5, transform: 'translateY(-50%)', background: grayDot, boxShadow: `0 0 0 1px ${grayDot}` })
+const outHandle = (top = '50%'): React.CSSProperties => ({ ...dotHandleBase, top, right: -5, transform: 'translateY(-50%)', background: '#2E77FF', boxShadow: '0 0 0 1px #2E77FF' })
+const okHandle  = (top = '35%'): React.CSSProperties => ({ ...dotHandleBase, top, right: -5, transform: 'translateY(-50%)', background: '#22c55e', boxShadow: '0 0 0 1px #22c55e' })
+const errHandle = (top = '65%'): React.CSSProperties => ({ ...dotHandleBase, top, right: -5, transform: 'translateY(-50%)', background: '#ef4444', boxShadow: '0 0 0 1px #ef4444' })
+
+// ── tech-node handles (transition / standalone submission) ────────────────
+
+function TechHandles() {
+  return <>
+    <Handle type="target" position={Position.Left}  id="antes"  style={inHandle()} />
+    <Handle type="source" position={Position.Right} id="sucesso" style={okHandle()} />
+    <Handle type="source" position={Position.Right} id="falha"   style={errHandle()} />
+  </>
+}
 
 const BjjNode = memo(function BjjNode({ data }: NodeProps) {
   const d = data as BjjNodeData
@@ -152,12 +132,35 @@ const BjjNode = memo(function BjjNode({ data }: NodeProps) {
     boxSizing: 'border-box',
   }
 
-  return (
-    <>
+  // Outer handles depend on node type:
+  //  - transition            → antes + sucesso + falha (visible)
+  //  - position standalone   → antes (left) + depois (right) (visible)
+  //  - submission standalone → antes + sucesso + falha (visible)
+  //  - group parent (any)    → NO outer handles (connections go only to child mini-card handles)
+  //  - system/other          → invisible background handles (fallback)
+  const outerHandles = () => {
+    if (isGroup) return null
+    if (d.nodeType === 'transition' || d.nodeType === 'submission') return <TechHandles />
+    if (d.nodeType === 'position') return <>
+      <Handle type="target" position={Position.Left}  id="antes"  style={inHandle()} />
+      <Handle type="source" position={Position.Right} id="depois"  style={outHandle()} />
+    </>
+    // system / unknown — generic invisible handles
+    return <>
       <Handle type="target" position={Position.Left}   id="tl" style={H} />
       <Handle type="target" position={Position.Top}    id="tt" style={H} />
       <Handle type="target" position={Position.Right}  id="tr" style={H} />
       <Handle type="target" position={Position.Bottom} id="tb" style={H} />
+      <Handle type="source" position={Position.Right}  id="sr" style={H} />
+      <Handle type="source" position={Position.Bottom} id="sb" style={H} />
+      <Handle type="source" position={Position.Left}   id="sl" style={H} />
+      <Handle type="source" position={Position.Top}    id="st" style={H} />
+    </>
+  }
+
+  return (
+    <>
+      {outerHandles()}
 
       <div
         style={cardStyle}
@@ -186,28 +189,6 @@ const BjjNode = memo(function BjjNode({ data }: NodeProps) {
         {/* ── divider ── */}
         <div style={{ height: 1, background: C.divider, margin: '0 14px' }} />
 
-        {/* ── transition border handles (antes/sucesso/falha) ── */}
-        {d.nodeType === 'transition' && <>
-          <Handle type="target" position={Position.Left} id="antes"
-            style={{ top: '50%', left: -5, transform: 'translateY(-50%)',
-              width: 10, height: 10,
-              background: dark ? '#4b5563' : '#9CA3AF',
-              border: `2px solid ${C.cardBg}`,
-              boxShadow: `0 0 0 1px ${dark ? '#4b5563' : '#9CA3AF'}` }} />
-          <Handle type="source" position={Position.Right} id="sucesso"
-            style={{ top: '35%', right: -5, transform: 'translateY(-50%)',
-              width: 10, height: 10,
-              background: '#22c55e',
-              border: `2px solid ${C.cardBg}`,
-              boxShadow: '0 0 0 1px #22c55e' }} />
-          <Handle type="source" position={Position.Right} id="falha"
-            style={{ top: '65%', right: -5, transform: 'translateY(-50%)',
-              width: 10, height: 10,
-              background: '#ef4444',
-              border: `2px solid ${C.cardBg}`,
-              boxShadow: '0 0 0 1px #ef4444' }} />
-        </>}
-
         {/* ── collapsed group mini-cards ── */}
         {isGroup && d.childrenSummary && d.childrenSummary.length > 0 && (
           <div style={{ padding: '8px 12px 10px', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -216,6 +197,7 @@ const BjjNode = memo(function BjjNode({ data }: NodeProps) {
                 ? child.label.slice(d.label.length)
                 : child.label).trim() || child.label
               const isChildSel = d.selectedChildId === child.id
+              const isSubmissionChild = child.nodeType === 'submission'
               return (
                 <div
                   key={child.id}
@@ -225,26 +207,33 @@ const BjjNode = memo(function BjjNode({ data }: NodeProps) {
                     borderRadius: 8,
                     position: 'relative',
                     cursor: 'pointer',
+                    minHeight: isSubmissionChild ? 52 : undefined,
                     boxShadow: isChildSel ? `0 0 0 3px ${C.highlightGlow}` : 'none',
                   }}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={(e) => { e.stopPropagation(); d.onChildClick?.(child.id) }}
                 >
+                  {/* incoming: antes — left side for all children */}
                   <Handle type="target" position={Position.Left} id={`child-${child.id}-in`}
-                    style={{ top: '50%', left: -5, transform: 'translateY(-50%)',
-                      width: 10, height: 10,
-                      background: dark ? '#4b5563' : '#9CA3AF',
-                      border: `2px solid ${C.cardBg}`,
-                      boxShadow: `0 0 0 1px ${dark ? '#4b5563' : '#9CA3AF'}` }} />
+                    style={inHandle(isSubmissionChild ? '50%' : '50%')} />
+
                   <div style={{ padding: '9px 14px' }}>
                     <span style={{ fontSize: 12, fontWeight: 600, color: C.titleText }}>{shortLabel}</span>
                   </div>
-                  <Handle type="source" position={Position.Right} id={`child-${child.id}-out`}
-                    style={{ top: '50%', right: -5, transform: 'translateY(-50%)',
-                      width: 10, height: 10,
-                      background: '#2E77FF',
-                      border: `2px solid ${C.cardBg}`,
-                      boxShadow: '0 0 0 1px #2E77FF' }} />
+
+                  {isSubmissionChild ? (
+                    /* Submission child: sucesso (top-right) + falha (bottom-right) */
+                    <>
+                      <Handle type="source" position={Position.Right} id={`child-${child.id}-sucesso`}
+                        style={okHandle('35%')} />
+                      <Handle type="source" position={Position.Right} id={`child-${child.id}-falha`}
+                        style={errHandle('65%')} />
+                    </>
+                  ) : (
+                    /* Position child: generic out — right side */
+                    <Handle type="source" position={Position.Right} id={`child-${child.id}-out`}
+                      style={outHandle()} />
+                  )}
                 </div>
               )
             })}
@@ -266,11 +255,6 @@ const BjjNode = memo(function BjjNode({ data }: NodeProps) {
           >×</button>
         )}
       </div>
-
-      <Handle type="source" position={Position.Right}  id="sr" style={H} />
-      <Handle type="source" position={Position.Bottom} id="sb" style={H} />
-      <Handle type="source" position={Position.Left}   id="sl" style={H} />
-      <Handle type="source" position={Position.Top}    id="st" style={H} />
     </>
   )
 })

@@ -106,6 +106,7 @@ const UI: Record<string, Record<Lang, string>> = {
   'flow.dest_pos':          { pt: 'Posição de chegada:', en: 'Destination:' },
   'flow.free_name':         { pt: 'Nome livre (sem espelho automático):', en: 'Free name (no auto mirror):' },
   'flow.search_dest':       { pt: 'Buscar posição de chegada...', en: 'Search destination position...' },
+  'flow.other_dest':        { pt: 'Outro destino:', en: 'Other destination:' },
   'flow.insert_panel':      { pt: 'Inserir posição', en: 'Insert position' },
   'flow.search_insert':     { pt: 'Buscar posição...', en: 'Search position...' },
 

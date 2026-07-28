@@ -9,6 +9,7 @@ export interface ManualEdge {
   target: string
   sourceHandle?: string
   targetHandle?: string
+  latent?: boolean
 }
 
 export interface PersistedState {
