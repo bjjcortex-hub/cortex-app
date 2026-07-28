@@ -80,14 +80,13 @@ function buildGraph(nodes: RawNode[], edges: RawEdge[]): MultiDirectedGraph {
 }
 
 export async function loadGraphFromSupabase(): Promise<MultiDirectedGraph> {
-  const { data: srcData, error: srcError } = await supabase
+  const { data: srcRows, error: srcError } = await supabase
     .from('sources')
     .select('id')
     .eq('key', 'bjjgraph')
-    .single()
-  if (srcError || !srcData) throw new Error('Source bjjgraph not found')
+  if (srcError || !srcRows?.length) throw new Error('Source bjjgraph not found')
 
-  const sourceId = (srcData as { id: string }).id
+  const sourceId = (srcRows as { id: string }[])[0].id
   const [nodes, edges] = await Promise.all([
     fetchAllNodes(sourceId),
     fetchAllEdges(sourceId),

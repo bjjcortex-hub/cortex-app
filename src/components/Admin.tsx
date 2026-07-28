@@ -393,9 +393,9 @@ export default function Admin() {
       setLoading(true)
       setLoadError(null)
       try {
-        const { data: src, error: srcErr } = await supabase.from('sources').select('id').eq('key', 'bjjgraph').single()
+        const { data: srcRows, error: srcErr } = await supabase.from('sources').select('id').eq('key', 'bjjgraph')
         if (srcErr) throw new Error(`sources: ${srcErr.message}`)
-        const sid = (src as { id: string })?.id
+        const sid = (srcRows as { id: string }[])?.[0]?.id
         setSourceId(sid)
         if (!sid) { setLoading(false); return }
         let from = 0; const all: AdminNode[] = []
