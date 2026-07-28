@@ -9,6 +9,8 @@ import { loadGraph } from '../lib/graphLoader'
 import { deriveVisibleNodes, deriveLatentEdges, conservativeCollapse } from '../lib/graphState'
 import { seedPosition } from '../lib/positioning'
 import { saveToStorage, loadFromStorage, type ManualEdge } from '../lib/persistence'
+import { listMindmaps, saveMindmap, getMindmapData, deleteMindmap } from '../lib/mindmapStorage'
+import type { DocumentSummary } from '../core/document/types'
 import type { NodeAttrs, EdgeAttrs } from '../types'
 import type { DocumentData } from '../core/document/types'
 import { LangContext, type Lang, t, tNodeType, useLang, nodeName } from '../lib/i18n'
@@ -156,6 +158,12 @@ export default function CanvasApp({ initialData, onDataChange, docTitle }: Canva
   const [extraNodeIds, setExtraNodeIds] = useState<Set<string>>(new Set())
   const [manualEdges, setManualEdges] = useState<ManualEdge[]>([])
 
+  // Cloud mindmap save/load (scratch-pad mode only)
+  const [savedMindmaps, setSavedMindmaps] = useState<DocumentSummary[]>([])
+  const [showMindmapList, setShowMindmapList] = useState(false)
+  const [showSaveName, setShowSaveName] = useState(false)
+  const [savingMindmapName, setSavingMindmapName] = useState('')
+
   const canvasRef = useRef<GraphCanvasHandle>(null)
 
   // ── load graph ──────────────────────────────────────────────────────────
@@ -165,6 +173,56 @@ export default function CanvasApp({ initialData, onDataChange, docTitle }: Canva
       .then(setGraph)
       .catch((e: unknown) => setError(String(e)))
       .finally(() => setLoading(false))
+  }, [])
+
+  // ── cloud mindmap list (scratch-pad mode) ──────────────────────────────
+
+  const refreshMindmapList = useCallback(() => {
+    if (onDataChange) return  // doc mode: no cloud list needed
+    listMindmaps().then(setSavedMindmaps).catch(console.error)
+  }, [onDataChange])
+
+  useEffect(() => { refreshMindmapList() }, [refreshMindmapList])
+
+  const handleSaveMindmap = useCallback(() => {
+    const title = savingMindmapName.trim()
+    if (!title || !graph) return
+    const docData = serializeMindmap({
+      rootNodeId, activeEdgeIds, hiddenNodeIds, lockedNodes,
+      fadedNodeIds, extraNodeIds, nodePositions: nodePositions.current, manualEdges,
+    }, graph)
+    saveMindmap(title, docData)
+      .then(summary => {
+        setSavedMindmaps(prev => [summary, ...prev])
+        setSavingMindmapName('')
+        setShowSaveName(false)
+      })
+      .catch(console.error)
+  }, [savingMindmapName, graph, rootNodeId, activeEdgeIds, hiddenNodeIds, lockedNodes, fadedNodeIds, extraNodeIds, manualEdges])
+
+  const handleLoadMindmap = useCallback((id: string) => {
+    if (!graph) return
+    getMindmapData(id)
+      .then(docData => {
+        const s = deserializeMindmap(docData)
+        nodePositions.current = s.nodePositions
+        setRootNodeId(s.rootNodeId && graph.hasNode(s.rootNodeId) ? s.rootNodeId : null)
+        setExtraNodeIds(new Set([...s.extraNodeIds].filter(nid => graph.hasNode(nid))))
+        setFadedNodeIds(new Set([...s.fadedNodeIds].filter(nid => graph.hasNode(nid))))
+        setActiveEdgeIds(new Set([...s.activeEdgeIds].filter(eid => graph.hasEdge(eid))))
+        setHiddenNodeIds(new Set([...s.hiddenNodeIds].filter(nid => graph.hasNode(nid))))
+        setLockedNodes(new Set([...s.lockedNodes].filter(nid => graph.hasNode(nid))))
+        setManualEdges(s.manualEdges)
+        setLayoutVersion(v => v + 1)
+        setShowMindmapList(false)
+      })
+      .catch(console.error)
+  }, [graph])
+
+  const handleDeleteMindmap = useCallback((id: string) => {
+    deleteMindmap(id)
+      .then(() => setSavedMindmaps(prev => prev.filter(m => m.id !== id)))
+      .catch(console.error)
   }, [])
 
   // ── restore persisted state after graph loads ───────────────────────────
@@ -984,6 +1042,48 @@ export default function CanvasApp({ initialData, onDataChange, docTitle }: Canva
             >
               {t('app.reset_btn', lang)}
             </button>
+          </>
+        )}
+
+        {appMode === 'mapa' && !onDataChange && (
+          <>
+            {showSaveName ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <input
+                  className="flow-meta-input compact"
+                  placeholder="Nome do mapa…"
+                  value={savingMindmapName}
+                  onChange={e => setSavingMindmapName(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') handleSaveMindmap(); if (e.key === 'Escape') setShowSaveName(false) }}
+                  autoFocus
+                />
+                <button className="btn-reset" onClick={handleSaveMindmap} disabled={!savingMindmapName.trim()}>✓</button>
+                <button className="btn-reset" onClick={() => { setShowSaveName(false); setSavingMindmapName('') }}>✕</button>
+              </div>
+            ) : (
+              <button className="btn-reset" onClick={() => setShowSaveName(true)}>
+                ☁ Salvar
+              </button>
+            )}
+            <div style={{ position: 'relative' }}>
+              <button className="btn-reset" onClick={() => setShowMindmapList(s => !s)}>
+                ☁ Mapas ({savedMindmaps.length})
+              </button>
+              {showMindmapList && (
+                <div className="flow2-saved-dropdown">
+                  {savedMindmaps.length === 0
+                    ? <div className="flow2-saved-item"><span className="flow2-saved-name" style={{ color: 'var(--muted)' }}>Nenhum salvo</span></div>
+                    : savedMindmaps.map(m => (
+                      <div key={m.id} className="flow2-saved-item">
+                        <span onClick={() => handleLoadMindmap(m.id)} className="flow2-saved-name">{m.title}</span>
+                        <span className="flow2-saved-date">{new Date(m.updatedAt).toLocaleDateString('pt-BR')}</span>
+                        <button className="flow2-saved-del" onClick={() => handleDeleteMindmap(m.id)}>✕</button>
+                      </div>
+                    ))
+                  }
+                </div>
+              )}
+            </div>
           </>
         )}
 

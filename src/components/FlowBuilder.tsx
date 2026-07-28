@@ -8,6 +8,7 @@ import { useLang, t, type Lang } from '../lib/i18n'
 import { NodeIcon, iconColor } from './NodeIcon'
 import { serializeFluxograma, deserializeFluxograma } from '../modes/fluxograma/serializer'
 import { resolveToParent, buildParentByChildId } from '../lib/graphUtils'
+import { loadFlows, saveFlowToDB, deleteFlowFromDB } from '../lib/flowStorage'
 
 
 function uid(): string {
@@ -129,16 +130,6 @@ function getSuccessDests(graph: MultiDirectedGraph, transNodeId: string): FightP
     }
   })
   return out
-}
-
-// ── storage ───────────────────────────────────────────────────────────────────
-
-const STORAGE_KEY = 'bjj-flows-v1'
-function loadSaved(): SavedFlow[] {
-  try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? '[]') } catch { return [] }
-}
-function persistAll(flows: SavedFlow[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(flows))
 }
 
 // ── start position helpers ────────────────────────────────────────────────────
@@ -560,9 +551,10 @@ export default function FlowBuilder({
   const [flowDate, setFlowDate]     = useState(docInitial?.date ?? '')
   const [flowDesc, setFlowDesc]     = useState(docInitial?.description ?? '')
   const [flowVideo, setFlowVideo]   = useState(docInitial?.videoLink ?? '')
-  const [panel, setPanel]         = useState<PanelPhase>({ type: 'idle' })
-  const [savedFlows, setSaved]    = useState<SavedFlow[]>(loadSaved)
-  const [showSaved, setShowSaved] = useState(false)
+  const [panel, setPanel]           = useState<PanelPhase>({ type: 'idle' })
+  const [savedFlows, setSaved]      = useState<SavedFlow[]>([])
+  const [flowsLoading, setFlowsLoading] = useState(true)
+  const [showSaved, setShowSaved]   = useState(false)
   const [editingCardId, setEditingCardId] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<{ name: string; result: 'success' | 'failure' }>({ name: '', result: 'success' })
   const [customText, setCustomText] = useState('')
@@ -575,6 +567,14 @@ export default function FlowBuilder({
   const timelineRef = useRef<HTMLDivElement>(null)
 
   const currentStep = steps[steps.length - 1] ?? null
+
+  // ── load saved flows from Supabase on mount ────────────────
+  useEffect(() => {
+    loadFlows()
+      .then(flows => setSaved(flows as SavedFlow[]))
+      .catch(console.error)
+      .finally(() => setFlowsLoading(false))
+  }, [])
 
   // ── ext_id → name lookup (for parent grouping) ────────────
   const extIdToName = useMemo(() => {
@@ -742,15 +742,16 @@ export default function FlowBuilder({
 
   function saveFlow() {
     if (!steps.length) return
-    const flow: SavedFlow = {
-      id: uid(), name: flowName, nameA, nameB,
+    const record = {
+      name: flowName, nameA, nameB,
       steps, savedAt: new Date().toISOString(),
       date: flowDate || undefined,
       description: flowDesc || undefined,
       videoLink: flowVideo || undefined,
     }
-    const updated = [...savedFlows, flow]
-    setSaved(updated); persistAll(updated)
+    saveFlowToDB(record)
+      .then(saved => setSaved(prev => [saved as SavedFlow, ...prev]))
+      .catch(console.error)
   }
 
   function loadFlow(flow: SavedFlow) {
@@ -760,8 +761,9 @@ export default function FlowBuilder({
   }
 
   function deleteFlow(id: string) {
-    const updated = savedFlows.filter(f => f.id !== id)
-    setSaved(updated); persistAll(updated)
+    deleteFlowFromDB(id)
+      .then(() => setSaved(prev => prev.filter(f => f.id !== id)))
+      .catch(console.error)
   }
 
   function openAsMindmap(flow: SavedFlow, actor: Actor) {
@@ -896,10 +898,10 @@ export default function FlowBuilder({
           </button>
         </div>
 
-        {savedFlows.length > 0 && (
+        {(flowsLoading || savedFlows.length > 0) && (
           <div style={{ marginTop: 12 }}>
-            <button className="btn-reset" onClick={() => setShowSaved(s => !s)}>
-              {t('flow.load_saved', lang)} ({savedFlows.length})
+            <button className="btn-reset" onClick={() => setShowSaved(s => !s)} disabled={flowsLoading}>
+              {flowsLoading ? 'Carregando…' : `${t('flow.load_saved', lang)} (${savedFlows.length})`}
             </button>
             {showSaved && (
               <div className="flow2-saved-list">
