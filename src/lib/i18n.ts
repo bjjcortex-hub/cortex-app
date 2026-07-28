@@ -58,6 +58,11 @@ const UI: Record<string, Record<Lang, string>> = {
   'panel.none_dest':        { pt: 'Destino não mapeado.', en: 'Destination not mapped.' },
   'panel.videos':           { pt: 'Vídeos', en: 'Videos' },
 
+  // FlowBuilder — fight metadata
+  'flow.date':              { pt: 'Data', en: 'Date' },
+  'flow.description':       { pt: 'Descrição', en: 'Description' },
+  'flow.video_link':        { pt: 'Link do vídeo', en: 'Video link' },
+
   // FlowBuilder — start screen
   'flow.fighter_a':         { pt: 'Lutador A', en: 'Fighter A' },
   'flow.fighter_b':         { pt: 'Lutador B', en: 'Fighter B' },

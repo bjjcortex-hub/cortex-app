@@ -52,6 +52,9 @@ interface SavedFlow {
   nameB: string
   steps: FightStep[]
   savedAt: string
+  date?: string
+  description?: string
+  videoLink?: string
 }
 
 type PanelPhase =
@@ -550,10 +553,13 @@ export default function FlowBuilder({
   const docInitial = initialData && initialData.nodes.length > 0
     ? deserializeFluxograma(initialData) : null
 
-  const [steps, setSteps]         = useState<FightStep[]>(docInitial?.steps ?? [])
-  const [nameA, setNameA]         = useState(docInitial?.nameA ?? 'Lutador A')
-  const [nameB, setNameB]         = useState(docInitial?.nameB ?? 'Lutador B')
-  const [flowName, setFlowName]   = useState(docInitial?.flowName ?? 'Novo fluxo')
+  const [steps, setSteps]           = useState<FightStep[]>(docInitial?.steps ?? [])
+  const [nameA, setNameA]           = useState(docInitial?.nameA ?? 'Lutador A')
+  const [nameB, setNameB]           = useState(docInitial?.nameB ?? 'Lutador B')
+  const [flowName, setFlowName]     = useState(docInitial?.flowName ?? 'Novo fluxo')
+  const [flowDate, setFlowDate]     = useState(docInitial?.date ?? '')
+  const [flowDesc, setFlowDesc]     = useState(docInitial?.description ?? '')
+  const [flowVideo, setFlowVideo]   = useState(docInitial?.videoLink ?? '')
   const [panel, setPanel]         = useState<PanelPhase>({ type: 'idle' })
   const [savedFlows, setSaved]    = useState<SavedFlow[]>(loadSaved)
   const [showSaved, setShowSaved] = useState(false)
@@ -739,6 +745,9 @@ export default function FlowBuilder({
     const flow: SavedFlow = {
       id: uid(), name: flowName, nameA, nameB,
       steps, savedAt: new Date().toISOString(),
+      date: flowDate || undefined,
+      description: flowDesc || undefined,
+      videoLink: flowVideo || undefined,
     }
     const updated = [...savedFlows, flow]
     setSaved(updated); persistAll(updated)
@@ -746,6 +755,7 @@ export default function FlowBuilder({
 
   function loadFlow(flow: SavedFlow) {
     setFlowName(flow.name); setNameA(flow.nameA); setNameB(flow.nameB)
+    setFlowDate(flow.date ?? ''); setFlowDesc(flow.description ?? ''); setFlowVideo(flow.videoLink ?? '')
     setSteps(flow.steps); setPanel({ type: 'idle' }); setShowSaved(false)
   }
 
@@ -837,7 +847,7 @@ export default function FlowBuilder({
   // ── doc mode: emit changes to parent ─────────────────────────
   const emitDocChange = useCallback(() => {
     if (!onDataChange) return
-    onDataChange(serializeFluxograma(steps, nameA, nameB, flowName))
+    onDataChange(serializeFluxograma(steps, nameA, nameB, flowName, flowDate || undefined, flowDesc || undefined, flowVideo || undefined))
   }, [onDataChange, steps, nameA, nameB, flowName])
 
   useEffect(() => { emitDocChange() }, [emitDocChange])
@@ -860,6 +870,11 @@ export default function FlowBuilder({
           <input className="flow-name-input" value={nameA} onChange={e => setNameA(e.target.value)} placeholder={t('flow.fighter_a', lang)} />
           <span className="flow2-vs" style={{ fontSize: 14 }}>{t('flow.vs', lang)}</span>
           <input className="flow-name-input" value={nameB} onChange={e => setNameB(e.target.value)} placeholder={t('flow.fighter_b', lang)} />
+        </div>
+        <div className="flow-meta-fields">
+          <input className="flow-meta-input" type="date" value={flowDate} onChange={e => setFlowDate(e.target.value)} title={t('flow.date', lang)} />
+          <input className="flow-meta-input" value={flowDesc} onChange={e => setFlowDesc(e.target.value)} placeholder={t('flow.description', lang)} />
+          <input className="flow-meta-input" value={flowVideo} onChange={e => setFlowVideo(e.target.value)} placeholder={t('flow.video_link', lang)} />
         </div>
         <h3 className="flow-start-title">{t('flow.how_start', lang)}</h3>
         {!graph && (
@@ -942,6 +957,14 @@ export default function FlowBuilder({
           <input className="flow-name-input compact" value={nameA} onChange={e => setNameA(e.target.value)} />
           <span style={{ fontSize: 11, color: 'var(--muted)' }}>vs</span>
           <input className="flow-name-input compact" value={nameB} onChange={e => setNameB(e.target.value)} />
+        </div>
+        <div className="flow-meta-row">
+          <input className="flow-meta-input compact" type="date" value={flowDate} onChange={e => setFlowDate(e.target.value)} title={t('flow.date', lang)} />
+          <input className="flow-meta-input compact" value={flowDesc} onChange={e => setFlowDesc(e.target.value)} placeholder={t('flow.description', lang)} />
+          {flowVideo
+            ? <a href={flowVideo} target="_blank" rel="noopener noreferrer" className="flow-meta-video-link">▶ {t('flow.video_link', lang)}</a>
+            : <input className="flow-meta-input compact" value={flowVideo} onChange={e => setFlowVideo(e.target.value)} placeholder={t('flow.video_link', lang)} />
+          }
         </div>
         {onDataChange
           ? <span style={{ fontSize: 11, color: 'var(--muted)', marginLeft: 4 }}>auto-save</span>

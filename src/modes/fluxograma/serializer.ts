@@ -2,17 +2,23 @@ import type { DocumentData, CanvasNode, CanvasEdge } from '../../core/document/t
 import type { FightStep, Attempt, FightPos, Actor, SavedFlow } from '../../components/FlowBuilder'
 
 export interface FluxogramaState {
-  steps:    FightStep[]
-  nameA:    string
-  nameB:    string
-  flowName: string
+  steps:       FightStep[]
+  nameA:       string
+  nameB:       string
+  flowName:    string
+  date?:       string
+  description?: string
+  videoLink?:  string
 }
 
 export function serializeFluxograma(
   steps: FightStep[],
   nameA: string,
   nameB: string,
-  flowName: string
+  flowName: string,
+  date?: string,
+  description?: string,
+  videoLink?: string,
 ): DocumentData {
   const nodes: CanvasNode[] = steps.map(step => ({
     id:    step.id,
@@ -23,6 +29,9 @@ export function serializeFluxograma(
       posB:  step.posB,
       nameA,
       nameB,
+      date,
+      description,
+      videoLink,
     },
   }))
 
@@ -51,11 +60,14 @@ export function serializeFluxograma(
 }
 
 export function deserializeFluxograma(data: DocumentData): FluxogramaState {
-  const stepNodes = data.nodes.filter(n => n.type === 'step')
-  const firstMeta = stepNodes[0]?.data ?? {}
-  const nameA     = (firstMeta.nameA    as string | undefined) ?? 'Lutador A'
-  const nameB     = (firstMeta.nameB    as string | undefined) ?? 'Lutador B'
-  const flowName  = stepNodes[0]?.title ?? 'Fluxograma'
+  const stepNodes   = data.nodes.filter(n => n.type === 'step')
+  const firstMeta   = stepNodes[0]?.data ?? {}
+  const nameA       = (firstMeta.nameA       as string | undefined) ?? 'Lutador A'
+  const nameB       = (firstMeta.nameB       as string | undefined) ?? 'Lutador B'
+  const flowName    = stepNodes[0]?.title ?? 'Fluxograma'
+  const date        = (firstMeta.date        as string | undefined)
+  const description = (firstMeta.description as string | undefined)
+  const videoLink   = (firstMeta.videoLink   as string | undefined)
 
   const stepIdx = new Map<string, number>(stepNodes.map((n, i) => [n.id, i]))
 
@@ -80,17 +92,20 @@ export function deserializeFluxograma(data: DocumentData): FluxogramaState {
     })
   }
 
-  return { steps, nameA, nameB, flowName }
+  return { steps, nameA, nameB, flowName, date, description, videoLink }
 }
 
 // Convert a FluxogramaState to a SavedFlow shape (for use with extractMindmap)
 export function stateToSavedFlow(state: FluxogramaState): SavedFlow {
   return {
-    id:      'doc',
-    name:    state.flowName,
-    nameA:   state.nameA,
-    nameB:   state.nameB,
-    steps:   state.steps,
-    savedAt: new Date().toISOString(),
+    id:          'doc',
+    name:        state.flowName,
+    nameA:       state.nameA,
+    nameB:       state.nameB,
+    steps:       state.steps,
+    savedAt:     new Date().toISOString(),
+    date:        state.date,
+    description: state.description,
+    videoLink:   state.videoLink,
   }
 }
