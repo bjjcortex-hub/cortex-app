@@ -339,6 +339,7 @@ export default function Admin() {
   const [sourceId, setSourceId] = useState<string | null>(null)
   const [nodes,    setNodes]    = useState<AdminNode[]>([])
   const [loading,  setLoading]  = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
   const [search,   setSearch]   = useState('')
   const [typeFilter, setFilter] = useState<string | null>(null)
 
@@ -390,23 +391,31 @@ export default function Admin() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const { data: src } = await supabase.from('sources').select('id').eq('key', 'bjjgraph').single()
-      const sid = (src as { id: string })?.id
-      setSourceId(sid)
-      if (!sid) { setLoading(false); return }
-      let from = 0; const all: AdminNode[] = []
-      while (true) {
-        const { data } = await supabase
-          .from('source_nodes')
-          .select('id, external_id, node_type, name, name_en:raw->>name, parent_external_id, description, source_id')
-          .eq('source_id', sid).order('name').range(from, from + 999)
-        if (!data || data.length === 0) break
-        all.push(...(data as AdminNode[]))
-        if (data.length < 1000) break
-        from += 1000
+      setLoadError(null)
+      try {
+        const { data: src, error: srcErr } = await supabase.from('sources').select('id').eq('key', 'bjjgraph').single()
+        if (srcErr) throw new Error(`sources: ${srcErr.message}`)
+        const sid = (src as { id: string })?.id
+        setSourceId(sid)
+        if (!sid) { setLoading(false); return }
+        let from = 0; const all: AdminNode[] = []
+        while (true) {
+          const { data, error: nodesErr } = await supabase
+            .from('source_nodes')
+            .select('id, external_id, node_type, name, name_en:raw->>name, parent_external_id, description, source_id')
+            .eq('source_id', sid).order('name').range(from, from + 999)
+          if (nodesErr) throw new Error(`source_nodes: ${nodesErr.message}`)
+          if (!data || data.length === 0) break
+          all.push(...(data as AdminNode[]))
+          if (data.length < 1000) break
+          from += 1000
+        }
+        setNodes(all)
+      } catch (e) {
+        setLoadError(String(e))
+      } finally {
+        setLoading(false)
       }
-      setNodes(all)
-      setLoading(false)
     }
     load()
   }, [])
@@ -668,6 +677,7 @@ export default function Admin() {
         )}
 
         {/* Node list */}
+        {loadError && <div className="admin-empty" style={{ color: '#f87171', wordBreak: 'break-all' }}>{loadError}</div>}
         {loading ? <div className="admin-empty">Carregando…</div> : (
           <div className="admin-node-list">
             <div className="admin-list-count">{filtered.length} {typeFilter === 'position' ? 'posições-pai' : 'nós'}</div>
