@@ -32,7 +32,7 @@ jobs:
         with:
           host: 157.230.235.181
           username: root
-          key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
           source: dist/*
           target: /var/www/bjj-explorer
           strip_components: 1
@@ -42,5 +42,5 @@ jobs:
         with:
           host: 157.230.235.181
           username: root
-          key: ${{ secrets.VPS_SSH_KEY }}
+          password: ${{ secrets.VPS_PASSWORD }}
           script: nginx -t && systemctl reload nginx
