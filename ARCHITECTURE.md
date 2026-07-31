@@ -147,15 +147,61 @@ Quando autenticação real for adicionada, `supabase.auth.linkIdentity()` migra 
 | Fase | Status | Descrição |
 |---|---|---|
 | 1 — Foundation | ✅ | Types, repository, auth, migration SQL, ARCHITECTURE.md |
-| 2 — Rotas | ⏳ | react-router-dom, DocsListPage, DocPage |
-| 3 — Canvas conectado | ⏳ | Serializers, canvas usa DocumentRepository, migra localStorage |
-| 4 — Engine unificado | 🔮 | ModeConfig<S>, primitivos compartilhados |
+| 2 — Rotas + Canvas | ✅ | react-router-dom, DocsListPage, DocPage, serializers |
+| 1-B — Schema canônico | ✅ | Migrations 002 e 003: evolui source_nodes com Bloco 3 completo + concept_proposals |
+| 1-C — GrappleMap seed | ⏳ | Script import-grapplemap.ts — executar após migrations no banco |
+| 1-D — Curator UI | ✅ | CuratorPage (/curador) + ConceptEditorPage (/conceitos/:id) |
+| 1-E — Tipos canônicos | ✅ | src/core/canonical/types.ts + infra/CanonicalConceptRepository.ts |
+| 3 — Motor de grafo | 🔮 | Probabilidades nas arestas — depende de dado real da Fase 2 |
+| 4 — IA interpretativa | 🔮 | Vídeo/imagem/áudio → concept_proposals |
+| 5 — Camadas de app | 🔮 | Jogo, academia, atleta — vistas sobre o mesmo core |
+
+---
+
+## Camada de Conceito Canônico
+
+Ver `src/core/canonical/types.ts` para os tipos completos do Bloco 3.
+
+```
+src/core/canonical/
+└── types.ts      # CanonicalConcept, ConceptAlias, ConceptProposal, ReviewAction…
+
+src/infra/
+├── CanonicalConceptRepository.ts  # CRUD de source_nodes + proposals
+└── SupabaseDocumentRepository.ts  # CRUD de user_documents (inalterado)
+
+src/pages/
+├── CuratorPage.tsx       # /curador — fila de governança por tier de confiança
+└── ConceptEditorPage.tsx # /conceitos/:id — editor completo com 5 abas
+
+supabase/migrations/
+├── 001_user_documents.sql         # user_documents (original)
+├── 002_canonical_concept_schema.sql # evolui source_nodes + cria concept_proposals
+└── 003_source_edges_canonical.sql   # adiciona weight/* em source_edges (placeholder)
+
+scripts/
+└── import-grapplemap.ts  # npm run import:grapplemap / import:grapplemap:dry
+```
+
+### Fluxo de governança (Bloco 4)
+
+```
+IA propõe → concept_proposals (status: pending, confidence_tier: high|medium|low)
+                   ↓
+Curador abre /curador → triagem por aba
+                   ↓
+✅ Aprovar → cria source_nodes (status: approved)
+✏️ Editar → ConceptEditorPage → salva → aprova
+🔀 Fundir → atualiza source_node existente
+❌ Rejeitar → concept_proposals (status: rejected)
+```
 
 ---
 
 ## Convenções
-
 - **Sem acesso direto a localStorage** fora de `infra/` ou `lib/persistence.ts` (deprecated)
 - **Sem chamadas Supabase** fora de `infra/` e `lib/graphLoader.ts`
 - **Canvas props**: sempre `data: DocumentData` + `onSave: (data: DocumentData) => void`
 - `schemaVersion` começa em 1; migrações de formato em `src/modes/<modo>/migrations/`
+- **Conceitos canônicos**: a IA nunca cria `source_nodes` diretamente — sempre via `concept_proposals`
+- **Peso das arestas**: campo `weight` em `source_edges` fica NULL até Fase 3
