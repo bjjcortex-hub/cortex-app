@@ -58,6 +58,17 @@ export class SupabaseDocumentRepository implements DocumentRepository {
     return (data as DbRow[]).map(rowToSummary)
   }
 
+  async listPublic(): Promise<DocumentSummary[]> {
+    const { data, error } = await supabaseAnon
+      .from('user_documents')
+      .select('id, type, title, visibility, created_at, updated_at')
+      .eq('visibility', 'public')
+      .order('updated_at', { ascending: false })
+
+    if (error) throw new Error(`listPublic: ${error.message}`)
+    return (data as DbRow[]).map(rowToSummary)
+  }
+
   async get(id: string): Promise<BjjDoc> {
     const { data, error } = await supabaseAnon
       .from('user_documents')

@@ -8,12 +8,17 @@ import CuratorPage from './pages/CuratorPage'
 import ConceptEditorPage from './pages/ConceptEditorPage'
 import AiAnalyzerPage from './pages/AiAnalyzerPage'
 import GraphExplorerPage from './pages/GraphExplorerPage'
+import PathfinderPage from './pages/PathfinderPage'
+import GalleryPage from './pages/GalleryPage'
 
 const router = createBrowserRouter([
   { path: '/',                         element: <CanvasApp /> },
   { path: '/docs',                     element: <DocsListPage /> },
   { path: '/docs/:id',                 element: <DocPage /> },
-  // ── Governança, IA e Grafo (Blocos 1, 4, 5 & 6) ───────────────────────────
+  // ── Governança, IA, Rotas, Galeria & Grafo ─────────────────────────────────
+  { path: '/rotas',                    element: <PathfinderPage /> },
+  { path: '/pathfinder',               element: <PathfinderPage /> },
+  { path: '/galeria',                  element: <GalleryPage /> },
   { path: '/grafo',                    element: <GraphExplorerPage /> },
   { path: '/explorar',                 element: <GraphExplorerPage /> },
   { path: '/ia',                       element: <AiAnalyzerPage /> },
