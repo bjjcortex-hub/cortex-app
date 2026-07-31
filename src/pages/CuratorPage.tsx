@@ -18,11 +18,11 @@ const BELT_WEIGHTS: Record<BeltRank, number> = {
 }
 
 const BELT_LABELS: Record<BeltRank, string> = {
-  preta: '🥋 Faixa Preta (+5 pts)',
-  marrom: '🥋 Faixa Marrom (+4 pts)',
-  roxa: '🥋 Faixa Roxa (+3 pts)',
-  azul: '🥋 Faixa Azul (+2 pts)',
-  branca: '🥋 Faixa Branca (+1 pt)',
+  preta: '🥋 Faixa Preta (+5 pts / Veto -5)',
+  marrom: '🥋 Faixa Marrom (+4 pts / Veto -4)',
+  roxa: '🥋 Faixa Roxa (+3 pts / Veto -3)',
+  azul: '🥋 Faixa Azul (+2 pts / Veto -2)',
+  branca: '🥋 Faixa Branca (+1 pt / Veto -1)',
 }
 
 const TIER_LABEL: Record<Tab, string> = {
@@ -41,15 +41,16 @@ const TIER_COLOR: Record<Tab, string> = {
 
 export default function CuratorPage() {
   const navigate = useNavigate()
-  const [activeTab, setActiveTab]         = useState<Tab>('high')
-  const [curatorRank, setCuratorRank]     = useState<BeltRank>('preta')
-  const [proposals, setProposals]         = useState<ConceptProposal[]>([])
-  const [proposalScores, setProposalScores] = useState<Record<string, number>>({})
-  const [counts, setCounts]               = useState<Record<Tab, number>>({ high: 0, medium: 0, low: 0 })
-  const [loading, setLoading]             = useState(true)
-  const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [error, setError]                 = useState<string | null>(null)
-  const [mergeTargetId, setMergeTargetId] = useState<Record<string, string>>({})
+  const [activeTab, setActiveTab]             = useState<Tab>('high')
+  const [curatorRank, setCuratorRank]         = useState<BeltRank>('preta')
+  const [proposals, setProposals]             = useState<ConceptProposal[]>([])
+  const [proposalScores, setProposalScores]   = useState<Record<string, number>>({})
+  const [highRankVotes, setHighRankVotes]     = useState<Record<string, boolean>>({})
+  const [counts, setCounts]                   = useState<Record<Tab, number>>({ high: 0, medium: 0, low: 0 })
+  const [loading, setLoading]                 = useState(true)
+  const [actionLoading, setActionLoading]     = useState<string | null>(null)
+  const [error, setError]                     = useState<string | null>(null)
+  const [mergeTargetId, setMergeTargetId]     = useState<Record<string, string>>({})
 
   // Carrega contagens para todas as abas
   const loadCounts = useCallback(async () => {
@@ -77,17 +78,34 @@ export default function CuratorPage() {
 
   useEffect(() => { loadProposals(activeTab) }, [activeTab, loadProposals])
 
-  // Votação Ponderada do Conselho Técnico Multi-Curador
-  async function handleVote(proposalId: string) {
+  // Votação Ponderada do Conselho Técnico Multi-Curador (com Quórum e Veto)
+  async function handleVote(proposalId: string, isVeto: boolean = false) {
     const currentScore = proposalScores[proposalId] || 0
-    const voteWeight = BELT_WEIGHTS[curatorRank]
-    const newScore = currentScore + voteWeight
+    const weight = BELT_WEIGHTS[curatorRank]
+    const delta = isVeto ? -weight : weight
+    const newScore = currentScore + delta
+
+    const isHighRank = curatorRank === 'preta' || curatorRank === 'marrom'
+    const hasHighRank = highRankVotes[proposalId] || isHighRank
 
     setProposalScores(prev => ({ ...prev, [proposalId]: newScore }))
+    if (isHighRank) {
+      setHighRankVotes(prev => ({ ...prev, [proposalId]: true }))
+    }
 
-    // Se atingiu o limite de 10 pontos de aprovação do conselho técnico
+    // Regra 1: Rejeição por Veto Ponderado acumulado (<= -10 pts)
+    if (newScore <= -10) {
+      await handleAction(proposalId, { type: 'reject', reason: 'Rejeitado por veto ponderado do conselho técnico' })
+      return
+    }
+
+    // Regra 2: Quórum Mínimo Obriga a presença de pelo menos 1 Faixa-Preta ou Marrom entre os 10 pts
     if (newScore >= 10) {
-      await handleAction(proposalId, { type: 'approve' })
+      if (hasHighRank) {
+        await handleAction(proposalId, { type: 'approve' })
+      } else {
+        setError('Quórum Pendente: Para aprovar, a soma de 10 pts exige pelo menos 1 voto de Faixa-Preta ou Faixa-Marrom.')
+      }
     }
   }
 
@@ -158,7 +176,7 @@ export default function CuratorPage() {
       <div className="curator-tab-desc" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           {activeTab === 'high' && (
-            <p>Propostas com confiança &gt; 85% — já batem com um conceito existente. Votação ponderada para liberar telemetria.</p>
+            <p>Propostas com confiança &gt; 85% — quórum de 10 pts exige ao menos 1 voto de Faixa-Preta/Marrom e permite veto negativo.</p>
           )}
           {activeTab === 'medium' && (
             <p>Propostas com confiança 50–85% — parecem variante de X ou Y. Revisão completa pelo conselho recomendada.</p>
@@ -169,7 +187,7 @@ export default function CuratorPage() {
         </div>
 
         <span style={{ fontSize: 11, background: 'rgba(59,130,246,0.15)', color: '#93c5fd', border: '1px solid #3b82f6', padding: '4px 10px', borderRadius: 12, fontWeight: 700 }}>
-          ⚡ Meta de Aprovação: 10 Pontos de Curadoria
+          🛡️ Quórum: 10 pts + 1 Voto Faixa-Preta/Marrom Obrigatório
         </span>
       </div>
 
@@ -196,13 +214,15 @@ export default function CuratorPage() {
               key={proposal.id}
               proposal={proposal}
               score={proposalScores[proposal.id] || 0}
+              hasHighRankVote={highRankVotes[proposal.id] || false}
               curatorRank={curatorRank}
               loading={actionLoading === proposal.id}
               mergeTargetId={mergeTargetId[proposal.id] ?? ''}
               onMergeTargetChange={val =>
                 setMergeTargetId(prev => ({ ...prev, [proposal.id]: val }))
               }
-              onVote={() => handleVote(proposal.id)}
+              onVote={() => handleVote(proposal.id, false)}
+              onVeto={() => handleVote(proposal.id, true)}
               onApprove={() => handleAction(proposal.id, { type: 'approve' })}
               onEdit={() => navigate(`/conceitos/proposta/${proposal.id}`)}
               onMerge={() => handleAction(proposal.id, {
@@ -223,11 +243,13 @@ export default function CuratorPage() {
 interface ProposalCardProps {
   proposal: ConceptProposal
   score: number
+  hasHighRankVote: boolean
   curatorRank: BeltRank
   loading: boolean
   mergeTargetId: string
   onMergeTargetChange: (val: string) => void
   onVote: () => void
+  onVeto: () => void
   onApprove: () => void
   onEdit: () => void
   onMerge: () => void
@@ -235,15 +257,15 @@ interface ProposalCardProps {
 }
 
 function ProposalCard({
-  proposal, score, curatorRank, loading, mergeTargetId, onMergeTargetChange,
-  onVote, onApprove, onEdit, onMerge, onReject,
+  proposal, score, hasHighRankVote, curatorRank, loading, mergeTargetId, onMergeTargetChange,
+  onVote, onVeto, onApprove, onEdit, onMerge, onReject,
 }: ProposalCardProps) {
   const name = proposal.node_data.preferred_name
     ?? (proposal.node_data as Record<string, unknown>)['name'] as string
     ?? 'Sem nome'
 
   const sig = proposal.node_data.structural_signature
-  const progressPct = Math.min(100, Math.round((score / 10) * 100))
+  const progressPct = Math.min(100, Math.max(0, Math.round((score / 10) * 100)))
 
   return (
     <div className={`proposal-card ${loading ? 'loading' : ''}`}>
@@ -271,10 +293,12 @@ function ProposalCard({
       <div style={{ margin: '10px 0', background: 'rgba(0,0,0,0.3)', padding: 10, borderRadius: 6, border: '1px solid var(--border)' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, fontWeight: 700, marginBottom: 4 }}>
           <span>Votação do Conselho Técnico: {score} / 10 pts</span>
-          <span style={{ color: progressPct >= 100 ? '#34d399' : '#fbbf24' }}>{progressPct}% aprovado</span>
+          <span style={{ color: hasHighRankVote ? '#34d399' : '#fbbf24' }}>
+            {hasHighRankVote ? '✓ Quórum Alta Graduação OK' : '⚠️ Quórum Alta Graduação Pendente'}
+          </span>
         </div>
         <div style={{ height: 6, background: '#334155', borderRadius: 3, overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: `${progressPct}%`, background: progressPct >= 100 ? '#10b981' : '#3b82f6', transition: 'width 0.3s' }} />
+          <div style={{ height: '100%', width: `${progressPct}%`, background: score < 0 ? '#ef4444' : progressPct >= 100 && hasHighRankVote ? '#10b981' : '#3b82f6', transition: 'width 0.3s' }} />
         </div>
       </div>
 
@@ -296,9 +320,19 @@ function ProposalCard({
           onClick={onVote}
           disabled={loading}
           style={{ background: '#3b82f6' }}
-          title={`Votar com pontuação da sua ${BELT_LABELS[curatorRank]}`}
+          title={`Votar a favor (+${BELT_WEIGHTS[curatorRank]} pts)`}
         >
           🥋 Votar (+{BELT_WEIGHTS[curatorRank]} pts)
+        </button>
+
+        <button
+          className="btn-action btn-reject"
+          onClick={onVeto}
+          disabled={loading}
+          style={{ background: 'rgba(239,68,68,0.8)' }}
+          title={`Veto ponderado (-${BELT_WEIGHTS[curatorRank]} pts)`}
+        >
+          ⛔ Veto (-{BELT_WEIGHTS[curatorRank]} pts)
         </button>
 
         <button
