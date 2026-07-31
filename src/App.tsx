@@ -25,7 +25,7 @@ const router = createBrowserRouter([
   { path: '/curador',                  element: <CuratorPage /> },
   { path: '/conceitos/:id',            element: <ConceptEditorPage /> },
   { path: '/conceitos/proposta/:id',   element: <ConceptEditorPage /> },
-])
+], { basename: import.meta.env.BASE_URL || '/' })
 
 export default function App() {
   useEffect(() => {
