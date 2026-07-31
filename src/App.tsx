@@ -10,12 +10,15 @@ import AiAnalyzerPage from './pages/AiAnalyzerPage'
 import GraphExplorerPage from './pages/GraphExplorerPage'
 import PathfinderPage from './pages/PathfinderPage'
 import GalleryPage from './pages/GalleryPage'
+import SpiderNetPage from './pages/SpiderNetPage'
 
 const router = createBrowserRouter([
   { path: '/',                         element: <CanvasApp /> },
   { path: '/docs',                     element: <DocsListPage /> },
   { path: '/docs/:id',                 element: <DocPage /> },
-  // ── Governança, IA, Rotas, Galeria & Grafo ─────────────────────────────────
+  // ── Governança, IA, Rotas, Teia, Galeria & Grafo ───────────────────────────
+  { path: '/spider',                   element: <SpiderNetPage /> },
+  { path: '/teia',                     element: <SpiderNetPage /> },
   { path: '/rotas',                    element: <PathfinderPage /> },
   { path: '/pathfinder',               element: <PathfinderPage /> },
   { path: '/galeria',                  element: <GalleryPage /> },
