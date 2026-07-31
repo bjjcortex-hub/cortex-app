@@ -118,7 +118,9 @@ export async function loadGraphFromSupabase(): Promise<MultiDirectedGraph> {
 
 export async function loadGraphFromSnapshot(): Promise<MultiDirectedGraph> {
   try {
-    const res = await fetch('/graph-snapshot.json')
+    const baseUrl = import.meta.env.BASE_URL || '/'
+    const snapshotUrl = baseUrl.endsWith('/') ? `${baseUrl}graph-snapshot.json` : `${baseUrl}/graph-snapshot.json`
+    const res = await fetch(snapshotUrl)
     const contentType = res.headers.get('content-type') ?? ''
     if (!res.ok || !contentType.includes('application/json')) {
       console.warn('graph-snapshot.json não encontrado ou inválido — usando grafo vazio')

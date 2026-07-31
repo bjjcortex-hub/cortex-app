@@ -191,6 +191,7 @@ export default function BjjAnalyticsPage() {
         </div>
 
         <div style={{ display: 'flex', gap: 10, marginLeft: 'auto', alignItems: 'center' }}>
+          <Link to="/canvas" className="btn-reset" style={{ borderColor: '#3b82f6', color: '#60a5fa' }}>📄 Canvas Mindmap</Link>
           <Link to="/docs" className="btn-reset">📁 Documentos</Link>
           <Link to="/galeria" className="btn-reset">🌍 Galeria</Link>
           <Link to="/grafo" className="btn-reset">🌐 Grafo BJJ</Link>

@@ -15,7 +15,8 @@ import BjjAnalyticsPage from './pages/BjjAnalyticsPage'
 const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
 
 const router = createBrowserRouter([
-  { path: '/',                         element: <CanvasApp /> },
+  { path: '/',                         element: <BjjAnalyticsPage /> },
+  { path: '/canvas',                   element: <CanvasApp /> },
   { path: '/docs',                     element: <DocsListPage /> },
   { path: '/docs/:id',                 element: <DocPage /> },
   // ── Central Unificada de Analítica & Telemetria ───────────────────────────
@@ -32,7 +33,7 @@ const router = createBrowserRouter([
   { path: '/curador',                  element: <CuratorPage /> },
   { path: '/conceitos/:id',            element: <ConceptEditorPage /> },
   { path: '/conceitos/proposta/:id',   element: <ConceptEditorPage /> },
-  { path: '*',                         element: <CanvasApp /> },
+  { path: '*',                         element: <BjjAnalyticsPage /> },
 ], { basename: base || '/' })
 
 export default function App() {
