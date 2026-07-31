@@ -12,13 +12,14 @@
           var decoded = l.search.slice(1).split('&').map(function(s) { 
             return s.replace(/~and~/g, '&')
           }).join('?');
+          var cleanPath = l.pathname.endsWith('/') ? l.pathname.slice(0, -1) : l.pathname;
           window.history.replaceState(null, null,
-              l.pathname.slice(0, -1) + decoded + l.hash
+              cleanPath + decoded + l.hash
           );
         }
       }(window.location))
     </script>
-    <script type="module" crossorigin src="/cortex-app/static/index-DhRqmt7p.js"></script>
+    <script type="module" crossorigin src="/cortex-app/static/index-CjAr4tzV.js"></script>
     <link rel="stylesheet" crossorigin href="/cortex-app/static/index-CF48z5ly.css">
   </head>
   <body>
