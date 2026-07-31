@@ -248,13 +248,44 @@ async function main() {
     process.exit(1)
   }
 
+  // Obtém ou cria a fonte no banco
+  let sourceId: string | null = null
+  const { data: srcData } = await supabase.from('sources').select('id').eq('key', 'grapplemap').maybeSingle()
+  if (srcData?.id) {
+    sourceId = srcData.id
+  } else {
+    const { data: bjjData } = await supabase.from('sources').select('id').limit(1).maybeSingle()
+    if (bjjData?.id) {
+      sourceId = bjjData.id
+    } else {
+      const { data: newSrc, error: srcErr } = await supabase
+        .from('sources')
+        .insert({ key: 'grapplemap', name: 'GrappleMap Public' })
+        .select('id')
+        .single()
+      if (srcErr) throw new Error(`Falha ao criar source 'grapplemap': ${srcErr.message}`)
+      sourceId = newSrc.id
+    }
+  }
+
   // ── Prepara nós (source_nodes) ───────────────────────────────────────────────
+  const seenSlugs = new Set<string>()
   const nodeRows = nodes.map((pos) => {
-    const slug = `gm-${toSlug(pos.name)}`
+    let slug = `gm-${toSlug(pos.name)}`
+    if (!slug || slug === 'gm-') slug = `gm-${pos.id}`
+
+    if (seenSlugs.has(slug)) {
+      let count = 2
+      while (seenSlugs.has(`${slug}-${count}`)) count++
+      slug = `${slug}-${count}`
+    }
+    seenSlugs.add(slug)
+
     const gamePhasesArr = tagsToGamePhases(pos.tags)
     const giNogiVal = tagsToGiNogi(pos.tags)
 
     return {
+      source_id:       sourceId,
       external_id:     pos.id,
       node_type:       'position',
       name:            pos.name,
@@ -296,7 +327,7 @@ async function main() {
 
   // ── Inserção real ─────────────────────────────────────────────────────────────
   console.log(`\n📤 Inserindo ${nodeRows.length} posições em source_nodes...`)
-  await upsertBatch(supabase, 'source_nodes', nodeRows, 'external_id')
+  await upsertBatch(supabase, 'source_nodes', nodeRows, 'source_id,external_id')
   console.log(`✅ ${nodeRows.length} posições inseridas/atualizadas no Supabase!`)
 
   console.log('\n🎉 Importação do GrappleMap concluída com sucesso!')
