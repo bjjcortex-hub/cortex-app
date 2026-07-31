@@ -11,6 +11,9 @@ import GraphExplorerPage from './pages/GraphExplorerPage'
 import GalleryPage from './pages/GalleryPage'
 import BjjAnalyticsPage from './pages/BjjAnalyticsPage'
 
+// Basename para React Router NÃO deve ter barra no final (/cortex-app)
+const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '')
+
 const router = createBrowserRouter([
   { path: '/',                         element: <CanvasApp /> },
   { path: '/docs',                     element: <DocsListPage /> },
@@ -29,7 +32,8 @@ const router = createBrowserRouter([
   { path: '/curador',                  element: <CuratorPage /> },
   { path: '/conceitos/:id',            element: <ConceptEditorPage /> },
   { path: '/conceitos/proposta/:id',   element: <ConceptEditorPage /> },
-], { basename: import.meta.env.BASE_URL || '/' })
+  { path: '*',                         element: <CanvasApp /> },
+], { basename: base || '/' })
 
 export default function App() {
   useEffect(() => {
