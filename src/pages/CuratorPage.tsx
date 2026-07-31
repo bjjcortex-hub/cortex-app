@@ -80,9 +80,14 @@ export default function CuratorPage() {
       <header className="topbar">
         <Link to="/docs" className="logo">BJJ Cortex</Link>
         <span className="topbar-title">Curadoria de Conceitos</span>
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--muted)' }}>
-          {proposals.length} proposta{proposals.length !== 1 ? 's' : ''} pendente{proposals.length !== 1 ? 's' : ''}
-        </span>
+        <div style={{ display: 'flex', gap: 10, marginLeft: 'auto', alignItems: 'center' }}>
+          <Link to="/docs" className="btn-reset">📁 Documentos</Link>
+          <Link to="/grafo" className="btn-reset">🌐 Grafo BJJ</Link>
+          <Link to="/ia" className="btn-reset">🧠 IA Analisador</Link>
+          <span style={{ fontSize: 12, color: 'var(--muted)', marginLeft: 8 }}>
+            {proposals.length} proposta{proposals.length !== 1 ? 's' : ''} pendente{proposals.length !== 1 ? 's' : ''}
+          </span>
+        </div>
       </header>
 
       {/* ─── Abas de triagem ────────────────────────────────────────────────── */}

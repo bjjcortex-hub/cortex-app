@@ -130,6 +130,7 @@ export default function AiAnalyzerPage() {
         <span className="topbar-title">Motor de IA Interpretativa (Layer 1)</span>
         <div style={{ display: 'flex', gap: 10, marginLeft: 'auto', alignItems: 'center' }}>
           <Link to="/docs" className="btn-reset">📁 Documentos</Link>
+          <Link to="/grafo" className="btn-reset">🌐 Grafo BJJ</Link>
           <Link to="/curador" className="btn-reset" style={{ borderColor: 'var(--accent)' }}>
             ⚖️ Fila de Curadoria (/curador)
           </Link>
