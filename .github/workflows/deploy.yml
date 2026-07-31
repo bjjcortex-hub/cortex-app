@@ -1,0 +1,46 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_KEY: ${{ secrets.VITE_SUPABASE_KEY }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_OFFLINE: false
+
+      - name: Deploy to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: 157.230.235.181
+          username: root
+          password: ${{ secrets.VPS_PASSWORD }}
+          source: dist/*
+          target: /var/www/bjj-explorer
+          strip_components: 1
+
+      - name: Reload nginx
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 157.230.235.181
+          username: root
+          password: ${{ secrets.VPS_PASSWORD }}
+          script: nginx -t && systemctl reload nginx
