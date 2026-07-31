@@ -10,11 +10,13 @@ export interface PathStep {
   nodeType: string
   edgeId?: string
   edgeLabel?: string
+  weight?: number
 }
 
 export interface PathResult {
   steps: PathStep[]
   length: number
+  overallProbability?: number
 }
 
 export class PathfinderEngine {
@@ -28,7 +30,8 @@ export class PathfinderEngine {
   }
 
   /**
-   * Encontra o menor caminho (BFS) entre a posição de origem e destino no grafo de BJJ.
+   * Encontra a rota de MAIOR PROBABILIDADE DE SUCESSO (Dijkstra Ponderado)
+   * usando os pesos estatísticos das 100+ lutas e telemetria de combate.
    */
   async findShortestPath(sourceId: string, targetId: string): Promise<PathResult | null> {
     const G = await this.init()
@@ -43,51 +46,88 @@ export class PathfinderEngine {
       return {
         steps: [{ nodeId: sourceId, nodeName: name, nodeType: type }],
         length: 0,
+        overallProbability: 1.0,
       }
     }
 
-    // Fila BFS: [nodeId, pathArray]
-    const queue: Array<[string, PathStep[]]> = []
+    // Dijkstra Priority Queue: menor custo = -log(weight)
+    const dist = new Map<string, number>()
+    const prev = new Map<string, { nodeId: string; edgeId: string; edgeLabel: string; weight: number }>()
+
+    dist.set(sourceId, 0)
+
+    const priorityQueue: Array<{ nodeId: string; cost: number }> = [{ nodeId: sourceId, cost: 0 }]
     const visited = new Set<string>()
 
-    const startName = G.getNodeAttribute(sourceId, 'name') as string
-    const startType = G.getNodeAttribute(sourceId, 'node_type') as string
+    while (priorityQueue.length > 0) {
+      // Ordena para pegar o nó de menor custo
+      priorityQueue.sort((a, b) => a.cost - b.cost)
+      const current = priorityQueue.shift()!
 
-    queue.push([sourceId, [{ nodeId: sourceId, nodeName: startName, nodeType: startType }]])
-    visited.add(sourceId)
+      if (visited.has(current.nodeId)) continue
+      visited.add(current.nodeId)
 
-    while (queue.length > 0) {
-      const [currentId, currentPath] = queue.shift()!
+      if (current.nodeId === targetId) break
 
-      if (currentId === targetId) {
-        return { steps: currentPath, length: currentPath.length - 1 }
-      }
+      G.forEachOutEdge(current.nodeId, (edgeId, attrs, _src, tgt) => {
+        const edgeData = attrs as Record<string, unknown>
+        const weight = typeof edgeData.weight === 'number' ? edgeData.weight : 0.5
+        const label  = (edgeData.label as string) || ''
+        
+        // Custo = -log(probabilidade) -> somar custos multiplica probabilidades
+        const stepCost = -Math.log(Math.max(0.01, weight))
+        const newDist = current.cost + stepCost
 
-      // Evita caminhos excessivamente longos (> 8 passos)
-      if (currentPath.length > 8) continue
-
-      // Percorre arestas de saída
-      G.forEachOutEdge(currentId, (edgeId, attrs, _src, tgt) => {
-        if (!visited.has(tgt)) {
-          visited.add(tgt)
-          const tgtName = G.getNodeAttribute(tgt, 'name') as string
-          const tgtType = G.getNodeAttribute(tgt, 'node_type') as string
-          const label   = (attrs as Record<string, unknown>).label as string || ''
-
-          const nextStep: PathStep = {
-            nodeId: tgt,
-            nodeName: tgtName,
-            nodeType: tgtType,
-            edgeId,
-            edgeLabel: label,
-          }
-
-          queue.push([tgt, [...currentPath, nextStep]])
+        if (newDist < (dist.get(tgt) ?? Infinity)) {
+          dist.set(tgt, newDist)
+          prev.set(tgt, { nodeId: current.nodeId, edgeId, edgeLabel: label, weight })
+          priorityQueue.push({ nodeId: tgt, cost: newDist })
         }
       })
     }
 
-    return null
+    if (!dist.has(targetId)) {
+      return null
+    }
+
+    // Reconstrói o caminho
+    const steps: PathStep[] = []
+    let curr = targetId
+    let overallProb = 1.0
+
+    while (curr !== sourceId) {
+      const prevData = prev.get(curr)
+      if (!prevData) break
+
+      const currName = G.getNodeAttribute(curr, 'name') as string
+      const currType = G.getNodeAttribute(curr, 'node_type') as string
+
+      steps.unshift({
+        nodeId: curr,
+        nodeName: currName,
+        nodeType: currType,
+        edgeId: prevData.edgeId,
+        edgeLabel: prevData.edgeLabel,
+        weight: prevData.weight,
+      })
+
+      overallProb *= prevData.weight
+      curr = prevData.nodeId
+    }
+
+    const startName = G.getNodeAttribute(sourceId, 'name') as string
+    const startType = G.getNodeAttribute(sourceId, 'node_type') as string
+    steps.unshift({
+      nodeId: sourceId,
+      nodeName: startName,
+      nodeType: startType,
+    })
+
+    return {
+      steps,
+      length: steps.length - 1,
+      overallProbability: Math.round(overallProb * 100) / 100,
+    }
   }
 
   /**
@@ -99,7 +139,7 @@ export class PathfinderEngine {
     const nodes = path.steps.map((step, idx) => ({
       id: `step-${idx + 1}`,
       type: 'step',
-      title: title || `Rota BJJ: ${path.steps[0].nodeName} ➔ ${path.steps[path.steps.length - 1].nodeName}`,
+      title: title || `Rota BJJ (Probabilidade ${path.overallProbability ? Math.round(path.overallProbability * 100) + '%' : 'Alta'}): ${path.steps[0].nodeName} ➔ ${path.steps[path.steps.length - 1].nodeName}`,
       data: {
         posA: {
           nodeId: step.nodeId,
@@ -122,13 +162,14 @@ export class PathfinderEngine {
           actor: 'A',
           transName: next.edgeLabel || `Transição para ${next.nodeName}`,
           result: 'success',
+          weight: next.weight,
         },
       })
     }
 
     return documentRepository.create({
       type: 'fluxograma',
-      title: title || `Rota: ${path.steps[0].nodeName} ➔ ${path.steps[path.steps.length - 1].nodeName}`,
+      title: title || `Rota (Probabilidade: ${path.overallProbability ? Math.round(path.overallProbability * 100) + '%' : 'Alta'}): ${path.steps[0].nodeName} ➔ ${path.steps[path.steps.length - 1].nodeName}`,
       ownerId,
       forkedFrom: null,
       visibility: 'private',

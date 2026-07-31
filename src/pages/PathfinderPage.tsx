@@ -173,10 +173,17 @@ export default function PathfinderPage() {
         {pathResult && (
           <div style={{ background: 'var(--card-bg, #1e293b)', border: '1px solid var(--border)', borderRadius: 10, padding: 20, marginBottom: 30 }}>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
-                Rota Calculada ({pathResult.length} transições)
-              </h2>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
+              <div>
+                <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px 0' }}>
+                  Rota de Maior Probabilidade ({pathResult.length} transições)
+                </h2>
+                {pathResult.overallProbability != null && (
+                  <span style={{ fontSize: 12, background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid #10b981', padding: '3px 10px', borderRadius: 12, fontWeight: 700 }}>
+                    📊 Probabilidade Estimada de Sucesso: {Math.round(pathResult.overallProbability * 100)}%
+                  </span>
+                )}
+              </div>
               <button
                 onClick={handleExportToFlowchart}
                 disabled={exporting}
@@ -208,8 +215,13 @@ export default function PathfinderPage() {
                       {step.nodeName}
                     </div>
                     {step.edgeLabel && (
-                      <div style={{ fontSize: 11, color: '#93c5fd', marginTop: 2 }}>
-                        Ação: {step.edgeLabel}
+                      <div style={{ fontSize: 11, color: '#93c5fd', marginTop: 2, display: 'flex', gap: 8, alignItems: 'center' }}>
+                        <span>Ação: {step.edgeLabel}</span>
+                        {step.weight != null && (
+                          <span style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 6px', borderRadius: 4, color: '#fbbf24', fontSize: 10 }}>
+                            Taxa de Sucesso: {Math.round(step.weight * 100)}%
+                          </span>
+                        )}
                       </div>
                     )}
                   </div>
