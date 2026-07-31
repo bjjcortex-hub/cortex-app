@@ -122,7 +122,7 @@ export default function ConceptEditorPage() {
   if (error)   return <div className="splash error"><p>{error}</p><Link to="/curador">← Curadoria</Link></div>
   if (!concept || !draft) return null
 
-  const displayName = draft.preferred_name ?? concept.preferred_name ?? (concept as Record<string, unknown>)['name'] as string ?? concept.id
+  const displayName = draft.preferred_name ?? concept.preferred_name ?? (concept as unknown as Record<string, unknown>)['name'] as string ?? concept.id
 
   return (
     <div className="concept-editor">

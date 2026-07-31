@@ -74,6 +74,12 @@ export default function DocsListPage() {
         <Link to="/" className="logo">BJJ Explorer</Link>
         <span className="topbar-title">Meus Documentos</span>
         <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
+          <Link to="/ia" className="btn-reset">
+            🧠 IA Analisador
+          </Link>
+          <Link to="/curador" className="btn-reset" style={{ borderColor: 'var(--accent)' }}>
+            ⚖️ Curadoria
+          </Link>
           <button
             className="btn-reset"
             onClick={() => createDoc('mindmap')}

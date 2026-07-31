@@ -5,12 +5,13 @@
  * Importa o grafo público do GrappleMap para o Supabase como semente
  * estrutural do banco de conhecimento BJJ Cortex.
  *
+ * Fonte: https://raw.githubusercontent.com/Eelis/GrappleMap/master/GrappleMap.txt
  * GrappleMap: domínio público — https://github.com/Eelis/GrappleMap
- * ~586 posições, ~330 transições, 161 tags.
+ * ~580+ posições com tags e nomes.
  *
  * Uso:
  *   npm run import:grapplemap          — insere no banco
- *   npm run import:grapplemap --dry-run — valida sem inserir
+ *   npm run import:grapplemap:dry      — valida sem inserir
  *
  * Requer:
  *   .env.local com VITE_SUPABASE_URL e VITE_SUPABASE_KEY (service_role)
@@ -23,10 +24,10 @@ import { resolve } from 'path'
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const DRY_RUN = process.argv.includes('--dry-run')
-const GRAPPLEMAP_JSON_URL = 'https://raw.githubusercontent.com/Eelis/GrappleMap/master/doc/graph.json'
+const GRAPPLEMAP_RAW_URL = 'https://raw.githubusercontent.com/Eelis/GrappleMap/master/GrappleMap.txt'
 const BATCH_SIZE = 50
 
-// Carrega .env.local manualmente (sem vite)
+// Carrega .env.local manualmente
 function loadEnv(): Record<string, string> {
   const envPaths = ['.env.local', '.env']
   for (const p of envPaths) {
@@ -44,27 +45,83 @@ function loadEnv(): Record<string, string> {
   return {}
 }
 
-// ─── GrappleMap types (baseado no schema público) ────────────────────────────
+// ─── Parser de GrappleMap.txt ──────────────────────────────────────────────────
 
-interface GrappleMapNode {
+export interface GrappleMapParsedNode {
   id: string
-  description: string
-  tags?: string[]
+  name: string
+  tags: string[]
+  poseData: string[]
 }
 
-interface GrappleMapEdge {
-  id: string
-  from: string
-  to: string
-  description: string
-  tags?: string[]
-}
+function parseGrappleMapTxt(text: string): GrappleMapParsedNode[] {
+  const lines = text.split('\n')
+  const nodes: GrappleMapParsedNode[] = []
 
-interface GrappleMapData {
-  nodes?: GrappleMapNode[]
-  positions?: GrappleMapNode[]
-  edges?: GrappleMapEdge[]
-  transitions?: GrappleMapEdge[]
+  let currentNameLines: string[] = []
+  let currentTags: string[] = []
+  let currentPoseData: string[] = []
+  let readingPose = false
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].replace(/\r$/, '')
+
+    // Linha vazia indica separação ou inicio
+    if (!line.trim()) {
+      continue
+    }
+
+    // Se começa com 4 espaços ou tab, é dado da pose
+    if (line.startsWith('    ') || line.startsWith('\t')) {
+      readingPose = true
+      currentPoseData.push(line.trim())
+      continue
+    }
+
+    // Se estávamos lendo pose e agora vem texto não-indentado, salvamos o nó anterior
+    if (readingPose) {
+      if (currentNameLines.length > 0) {
+        const name = currentNameLines.join(' ').replace(/\\n/g, ' ').trim()
+        if (name) {
+          nodes.push({
+            id: `gm-${nodes.length + 1}`,
+            name,
+            tags: currentTags,
+            poseData: currentPoseData,
+          })
+        }
+      }
+      // Reset
+      currentNameLines = []
+      currentTags = []
+      currentPoseData = []
+      readingPose = false
+    }
+
+    // Se é linha de tags
+    if (line.startsWith('tags:')) {
+      const tagsStr = line.substring(5).trim()
+      currentTags = tagsStr ? tagsStr.split(/\s+/) : []
+    } else {
+      // É parte do nome do nó
+      currentNameLines.push(line.trim())
+    }
+  }
+
+  // Último nó caso o arquivo termine com ele
+  if (currentNameLines.length > 0) {
+    const name = currentNameLines.join(' ').replace(/\\n/g, ' ').trim()
+    if (name) {
+      nodes.push({
+        id: `gm-${nodes.length + 1}`,
+        name,
+        tags: currentTags,
+        poseData: currentPoseData,
+      })
+    }
+  }
+
+  return nodes
 }
 
 // ─── Mapeamento de tags GrappleMap → campos do schema canônico ────────────────
@@ -72,10 +129,24 @@ interface GrappleMapData {
 const TAG_TO_GAME_PHASE: Record<string, string> = {
   standing: 'standing',
   guard: 'guard',
-  'half guard': 'guard',
+  full_guard: 'guard',
+  half_guard: 'guard',
+  butterfly: 'guard',
+  x_guard: 'guard',
+  spider_guard: 'guard',
+  de_la_riva: 'guard',
   passing: 'passing',
-  control: 'control',
+  knee_slice: 'passing',
+  side_control: 'control',
+  mount: 'control',
+  back: 'control',
   submission: 'finish',
+  kimura: 'finish',
+  guillotine: 'finish',
+  armbar: 'finish',
+  triangle: 'finish',
+  rnc: 'finish',
+  rear_naked_choke: 'finish',
   escape: 'escape',
   takedown: 'standing',
   clinch: 'standing',
@@ -120,11 +191,12 @@ function toSlug(str: string): string {
 
 // ─── Fetch GrappleMap data ────────────────────────────────────────────────────
 
-async function fetchGrappleMap(): Promise<GrappleMapData> {
-  console.log(`📥 Baixando GrappleMap de: ${GRAPPLEMAP_JSON_URL}`)
-  const res = await fetch(GRAPPLEMAP_JSON_URL)
+async function fetchGrappleMap(): Promise<GrappleMapParsedNode[]> {
+  console.log(`📥 Baixando GrappleMap.txt de: ${GRAPPLEMAP_RAW_URL}`)
+  const res = await fetch(GRAPPLEMAP_RAW_URL)
   if (!res.ok) throw new Error(`Falha ao baixar GrappleMap: ${res.status} ${res.statusText}`)
-  return res.json() as Promise<GrappleMapData>
+  const text = await res.text()
+  return parseGrappleMapTxt(text)
 }
 
 // ─── Inserção em lotes ────────────────────────────────────────────────────────
@@ -166,51 +238,42 @@ async function main() {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 
-  // Baixa dados
-  const data = await fetchGrappleMap()
+  // Baixa e faz parse dos dados
+  const nodes = await fetchGrappleMap()
 
-  const positions: GrappleMapNode[] = data.nodes ?? data.positions ?? []
-  const transitions: GrappleMapEdge[] = data.edges ?? data.transitions ?? []
+  console.log(`\n✅ GrappleMap parsed: ${nodes.length} posições encontradas.\n`)
 
-  console.log(`\n✅ GrappleMap carregado:`)
-  console.log(`   Posições:   ${positions.length}`)
-  console.log(`   Transições: ${transitions.length}\n`)
-
-  if (positions.length === 0) {
-    console.warn('⚠️  Nenhuma posição encontrada. Verifique o formato do JSON do GrappleMap.')
-    console.warn('   O schema pode ter mudado. Inspecione:', GRAPPLEMAP_JSON_URL)
+  if (nodes.length === 0) {
+    console.warn('⚠️  Nenhuma posição encontrada no GrappleMap.txt.')
     process.exit(1)
   }
 
   // ── Prepara nós (source_nodes) ───────────────────────────────────────────────
-  const nodeRows = positions.map((pos) => {
-    const slug = `gm-${toSlug(pos.description)}`
+  const nodeRows = nodes.map((pos) => {
+    const slug = `gm-${toSlug(pos.name)}`
     const gamePhasesArr = tagsToGamePhases(pos.tags)
     const giNogiVal = tagsToGiNogi(pos.tags)
 
     return {
-      // Campos existentes no schema original
-      external_id:   pos.id,
-      node_type:     'position',
-      name:          pos.description,
-      description:   `Importado do GrappleMap. Tags: ${(pos.tags ?? []).join(', ')}`,
-
-      // Campos do schema canônico (002 migration)
-      canonical_id:  slug,
-      preferred_name: pos.description,
+      external_id:     pos.id,
+      node_type:       'position',
+      name:            pos.name,
+      description:     `Importado do GrappleMap. Tags: ${pos.tags.join(', ')}`,
+      canonical_id:    slug,
+      preferred_name:  pos.name,
       aliases: JSON.stringify([{
-        name:       pos.description,
+        name:       pos.name,
         lang:       'en',
         lineage:    'grapplemap',
         type:       'technical',
         popularity: 0.5,
       }]),
-      hierarchy_level:  null,         // GrappleMap não categoriza família/técnica/variante
+      hierarchy_level:  null,
       gi_nogi:          giNogiVal,
       game_phase:       gamePhasesArr,
       media_refs:       JSON.stringify([]),
       source_origin:    'grapplemap',
-      review_status:    'approved',   // Domínio público, confiança alta como semente
+      review_status:    'approved',
       approved_by:      null,
       approved_at:      new Date().toISOString(),
       ai_confidence:    null,
@@ -220,43 +283,23 @@ async function main() {
     }
   })
 
-  // ── Prepara arestas (source_edges) ───────────────────────────────────────────
-  // As arestas referenciam external_id; o banco usa UUIDs.
-  // A strategy: salvar com external_id como chave e resolver depois via view/join.
-  // Por ora, armazenamos as arestas com src_external_id/dst_external_id em metadata.
-  const edgeRows = transitions.map((tr) => ({
-    external_id:     tr.id,
-    edge_type:       'transition',
-    label:           tr.description,
-    is_submission:   (tr.tags ?? []).some(t => t.toLowerCase().includes('submission')),
-    // Referências por external_id — resolvidas na query via JOIN
-    src_external_id: tr.from,
-    dst_external_id: tr.to,
-    // Campos canônicos
-    weight:          null,
-    weight_context:  null,
-    weight_source:   null,
-  }))
-
   if (DRY_RUN) {
-    console.log('📋 PREVIEW — Primeiros 5 nós que seriam inseridos:')
-    nodeRows.slice(0, 5).forEach(n => console.log('  -', n.name, '|', n.canonical_id, '|', n.gi_nogi))
-    console.log(`\n📋 PREVIEW — Primeiras 5 arestas que seriam inseridas:`)
-    edgeRows.slice(0, 5).forEach(e => console.log('  -', e.label, '|', e.src_external_id, '→', e.dst_external_id))
-    console.log('\n✅ Dry-run concluído. Nenhum dado inserido.')
+    console.log('📋 PREVIEW — Primeiras 5 posições que serão inseridas:')
+    nodeRows.slice(0, 5).forEach((n, idx) => {
+      console.log(`  ${idx + 1}. [${n.external_id}] "${n.name}"`)
+      console.log(`     Slug: ${n.canonical_id} | Gi/Nogi: ${n.gi_nogi} | Fases: ${n.game_phase.join(', ') || 'Nenhuma'}`)
+    })
+    console.log(`\n📋 Total a ser inserido: ${nodeRows.length} posições.`)
+    console.log('\n✅ Dry-run concluído com sucesso. Nenhum dado inserido no banco.')
     return
   }
 
   // ── Inserção real ─────────────────────────────────────────────────────────────
   console.log(`\n📤 Inserindo ${nodeRows.length} posições em source_nodes...`)
   await upsertBatch(supabase, 'source_nodes', nodeRows, 'external_id')
-  console.log(`✅ ${nodeRows.length} posições inseridas/atualizadas.`)
+  console.log(`✅ ${nodeRows.length} posições inseridas/atualizadas no Supabase!`)
 
-  console.log(`\n📤 Inserindo ${edgeRows.length} transições em source_edges...`)
-  await upsertBatch(supabase, 'source_edges', edgeRows, 'external_id')
-  console.log(`✅ ${edgeRows.length} transições inseridas/atualizadas.`)
-
-  console.log('\n🎉 Importação do GrappleMap concluída!')
+  console.log('\n🎉 Importação do GrappleMap concluída com sucesso!')
   console.log(`   Verifique no Supabase: source_origin = 'grapplemap'`)
 }
 

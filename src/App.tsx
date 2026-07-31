@@ -6,12 +6,14 @@ import DocsListPage from './pages/DocsListPage'
 import DocPage from './pages/DocPage'
 import CuratorPage from './pages/CuratorPage'
 import ConceptEditorPage from './pages/ConceptEditorPage'
+import AiAnalyzerPage from './pages/AiAnalyzerPage'
 
 const router = createBrowserRouter([
   { path: '/',                         element: <CanvasApp /> },
   { path: '/docs',                     element: <DocsListPage /> },
   { path: '/docs/:id',                 element: <DocPage /> },
-  // ── Governança (Bloco 4) ──────────────────────────────────────────────────
+  // ── Governança e IA (Blocos 4 & 5) ────────────────────────────────────────
+  { path: '/ia',                       element: <AiAnalyzerPage /> },
   { path: '/curador',                  element: <CuratorPage /> },
   { path: '/conceitos/:id',            element: <ConceptEditorPage /> },
   { path: '/conceitos/proposta/:id',   element: <ConceptEditorPage /> },
