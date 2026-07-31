@@ -942,9 +942,31 @@ export default function CanvasApp({ initialData, onDataChange, docTitle }: Canva
             ← Docs
           </button>
         ) : (
-          <span className="logo">BJJ Explorer</span>
+          <span className="logo" style={{ cursor: 'pointer' }} onClick={() => navigate('/')}>BJJ Cortex</span>
         )}
         {docTitle && <span className="doc-title-inline" style={{ pointerEvents: 'none' }}>{docTitle}</span>}
+
+        {/* ── Central Master Navigation Links ─────────────────────────────── */}
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <button className="btn-reset" onClick={() => navigate('/analytics')} style={{ color: '#60a5fa', borderColor: '#3b82f6' }}>
+            📊 Analítica & Teia
+          </button>
+          <button className="btn-reset" onClick={() => navigate('/rotas')} style={{ color: '#34d399', borderColor: '#10b981' }}>
+            🧭 Rotas BJJ
+          </button>
+          <button className="btn-reset" onClick={() => navigate('/grafo')}>
+            🌐 Grafo BJJ
+          </button>
+          <button className="btn-reset" onClick={() => navigate('/ia')}>
+            🧠 IA
+          </button>
+          <button className="btn-reset" onClick={() => navigate('/galeria')}>
+            🌍 Galeria
+          </button>
+          <button className="btn-reset" onClick={() => navigate('/curador')} style={{ color: '#f59e0b' }}>
+            ⚖️ Curadoria
+          </button>
+        </div>
 
         <div className="app-mode-toggle">
           <button
