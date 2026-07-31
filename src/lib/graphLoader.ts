@@ -80,13 +80,25 @@ function buildGraph(nodes: RawNode[], edges: RawEdge[]): MultiDirectedGraph {
 }
 
 export async function loadGraphFromSupabase(): Promise<MultiDirectedGraph> {
-  const { data: srcRows, error: srcError } = await supabase
+  // Busca 'grapplemap' ou 'bjjgraph' ou qualquer fonte disponivel
+  const { data: srcRows } = await supabase
     .from('sources')
     .select('id')
-    .eq('key', 'bjjgraph')
-  if (srcError || !srcRows?.length) throw new Error('Source bjjgraph not found')
+    .in('key', ['grapplemap', 'bjjgraph'])
+    .limit(1)
 
-  const sourceId = (srcRows as { id: string }[])[0].id
+  let sourceId = srcRows?.[0]?.id
+
+  if (!sourceId) {
+    const { data: anyRows } = await supabase.from('sources').select('id').limit(1)
+    sourceId = anyRows?.[0]?.id
+  }
+
+  if (!sourceId) {
+    // Se ainda nao houver fonte, carrega do snapshot local
+    return loadGraphFromSnapshot()
+  }
+
   const [nodes, edges] = await Promise.all([
     fetchAllNodes(sourceId),
     fetchAllEdges(sourceId),
