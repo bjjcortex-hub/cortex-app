@@ -8,19 +8,20 @@ import CuratorPage from './pages/CuratorPage'
 import ConceptEditorPage from './pages/ConceptEditorPage'
 import AiAnalyzerPage from './pages/AiAnalyzerPage'
 import GraphExplorerPage from './pages/GraphExplorerPage'
-import PathfinderPage from './pages/PathfinderPage'
 import GalleryPage from './pages/GalleryPage'
-import SpiderNetPage from './pages/SpiderNetPage'
+import BjjAnalyticsPage from './pages/BjjAnalyticsPage'
 
 const router = createBrowserRouter([
   { path: '/',                         element: <CanvasApp /> },
   { path: '/docs',                     element: <DocsListPage /> },
   { path: '/docs/:id',                 element: <DocPage /> },
-  // ── Governança, IA, Rotas, Teia, Galeria & Grafo ───────────────────────────
-  { path: '/spider',                   element: <SpiderNetPage /> },
-  { path: '/teia',                     element: <SpiderNetPage /> },
-  { path: '/rotas',                    element: <PathfinderPage /> },
-  { path: '/pathfinder',               element: <PathfinderPage /> },
+  // ── Central Unificada de Analítica & Telemetria ───────────────────────────
+  { path: '/analytics',                element: <BjjAnalyticsPage /> },
+  { path: '/cards',                    element: <BjjAnalyticsPage /> },
+  { path: '/spider',                   element: <BjjAnalyticsPage /> },
+  { path: '/teia',                     element: <BjjAnalyticsPage /> },
+  { path: '/rotas',                    element: <BjjAnalyticsPage /> },
+  { path: '/pathfinder',               element: <BjjAnalyticsPage /> },
   { path: '/galeria',                  element: <GalleryPage /> },
   { path: '/grafo',                    element: <GraphExplorerPage /> },
   { path: '/explorar',                 element: <GraphExplorerPage /> },

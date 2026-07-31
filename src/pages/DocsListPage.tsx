@@ -74,8 +74,8 @@ export default function DocsListPage() {
         <Link to="/" className="logo">BJJ Explorer</Link>
         <span className="topbar-title">Meus Documentos</span>
         <div style={{ display: 'flex', gap: 8, marginLeft: 'auto' }}>
-          <Link to="/spider" className="btn-reset">
-            🕸️ Teia BJJ
+          <Link to="/analytics" className="btn-reset">
+            📊 Analítica & Teia
           </Link>
           <Link to="/rotas" className="btn-reset">
             🧭 Rotas BJJ
