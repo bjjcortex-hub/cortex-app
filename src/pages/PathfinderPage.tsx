@@ -15,6 +15,9 @@ export default function PathfinderPage() {
   const [sourceId, setSourceId] = useState('')
   const [targetId, setTargetId] = useState('')
 
+  // Modo de Rota (Dijkstra Weighted vs BFS Shortest)
+  const [mode, setMode] = useState<import('../core/pathfinder/pathfinderEngine').PathfinderMode>('dijkstra_weighted')
+
   // Estado do Cálculo
   const [calculating, setCalculating] = useState(false)
   const [pathResult, setPathResult]   = useState<PathResult | null>(null)
@@ -45,7 +48,7 @@ export default function PathfinderPage() {
     setPathResult(null)
 
     try {
-      const res = await pathfinderEngine.findShortestPath(sourceId, targetId)
+      const res = await pathfinderEngine.findPath(sourceId, targetId, mode)
       if (!res) {
         setError('Nenhuma rota encontrada entre as duas posições selecionadas.')
       } else {
@@ -144,6 +147,50 @@ export default function PathfinderPage() {
 
           </div>
 
+          {/* Seletor de Modo de Cálculo */}
+          <div style={{ margin: '14px 0', padding: 12, background: 'rgba(0,0,0,0.2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+            <span style={{ fontSize: 12, fontWeight: 700, display: 'block', marginBottom: 8 }}>
+              🎯 Algoritmo de Cálculo de Rota:
+            </span>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button
+                type="button"
+                onClick={() => setMode('dijkstra_weighted')}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  border: '1px solid ' + (mode === 'dijkstra_weighted' ? '#10b981' : 'var(--border)'),
+                  background: mode === 'dijkstra_weighted' ? 'rgba(16,185,129,0.15)' : 'transparent',
+                  color: mode === 'dijkstra_weighted' ? '#34d399' : 'var(--muted)',
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                🎯 Maior Probabilidade (Dijkstra Telemetria)
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMode('bfs_shortest')}
+                style={{
+                  flex: 1,
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  border: '1px solid ' + (mode === 'bfs_shortest' ? '#3b82f6' : 'var(--border)'),
+                  background: mode === 'bfs_shortest' ? 'rgba(59,130,246,0.15)' : 'transparent',
+                  color: mode === 'bfs_shortest' ? '#93c5fd' : 'var(--muted)',
+                  fontWeight: 700,
+                  fontSize: 12,
+                  cursor: 'pointer',
+                }}
+              >
+                ⚡ Menor Número de Passos (BFS Estrutural)
+              </button>
+            </div>
+          </div>
+
           {error && (
             <div style={{ color: '#ef4444', background: 'rgba(239,68,68,0.1)', padding: 10, borderRadius: 6, marginBottom: 14, fontSize: 13 }}>
               ⚠️ {error}
@@ -159,13 +206,13 @@ export default function PathfinderPage() {
               fontSize: 15,
               fontWeight: 700,
               color: '#fff',
-              background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+              background: mode === 'dijkstra_weighted' ? 'linear-gradient(135deg, #10b981 0%, #059669 100%)' : 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
               border: 'none',
               borderRadius: 8,
               cursor: calculating ? 'wait' : 'pointer',
             }}
           >
-            {calculating ? '🧭 Calculando Rota Biomecânica…' : '🚀 Calcular Menor Rota de BJJ'}
+            {calculating ? '🧭 Calculando Rota Biomecânica…' : (mode === 'dijkstra_weighted' ? '🚀 Calcular Rota de Maior Probabilidade' : '🚀 Calcular Rota de Menor Passo')}
           </button>
         </div>
 
@@ -176,13 +223,20 @@ export default function PathfinderPage() {
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
               <div>
                 <h2 style={{ fontSize: 18, fontWeight: 700, margin: '0 0 4px 0' }}>
-                  Rota de Maior Probabilidade ({pathResult.length} transições)
+                  {pathResult.mode === 'dijkstra_weighted' ? 'Rota de Maior Probabilidade' : 'Rota de Menor Passo'} ({pathResult.length} transições)
                 </h2>
-                {pathResult.overallProbability != null && (
-                  <span style={{ fontSize: 12, background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid #10b981', padding: '3px 10px', borderRadius: 12, fontWeight: 700 }}>
-                    📊 Probabilidade Estimada de Sucesso: {Math.round(pathResult.overallProbability * 100)}%
-                  </span>
-                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                  {pathResult.overallProbability != null && (
+                    <span style={{ fontSize: 12, background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid #10b981', padding: '3px 10px', borderRadius: 12, fontWeight: 700 }}>
+                      📊 Probabilidade Estimada: {Math.round(pathResult.overallProbability * 100)}%
+                    </span>
+                  )}
+                  {pathResult.hasUnsampledEdges && (
+                    <span style={{ fontSize: 11, background: 'rgba(245,158,11,0.15)', color: '#fbbf24', border: '1px solid #f59e0b', padding: '3px 10px', borderRadius: 12, fontWeight: 600 }}>
+                      ⚠️ Transições com amostragem pendente (N &lt; 5) utilizam peso neutro (50%)
+                    </span>
+                  )}
+                </div>
               </div>
               <button
                 onClick={handleExportToFlowchart}
@@ -218,8 +272,8 @@ export default function PathfinderPage() {
                       <div style={{ fontSize: 11, color: '#93c5fd', marginTop: 2, display: 'flex', gap: 8, alignItems: 'center' }}>
                         <span>Ação: {step.edgeLabel}</span>
                         {step.weight != null && (
-                          <span style={{ background: 'rgba(255,255,255,0.1)', padding: '1px 6px', borderRadius: 4, color: '#fbbf24', fontSize: 10 }}>
-                            Taxa de Sucesso: {Math.round(step.weight * 100)}%
+                          <span style={{ background: step.isUnsampled ? 'rgba(245,158,11,0.2)' : 'rgba(255,255,255,0.1)', padding: '1px 6px', borderRadius: 4, color: step.isUnsampled ? '#fbbf24' : '#34d399', fontSize: 10 }}>
+                            {step.isUnsampled ? 'Taxa: 50% (amostragem N < 5)' : `Taxa de Sucesso: ${Math.round(step.weight * 100)}%`}
                           </span>
                         )}
                       </div>

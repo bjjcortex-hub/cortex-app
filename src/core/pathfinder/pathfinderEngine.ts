@@ -4,6 +4,8 @@ import { documentRepository } from '../../infra/SupabaseDocumentRepository'
 import { getCurrentOwnerId } from '../../infra/auth'
 import type { BjjDoc } from '../document/types'
 
+export type PathfinderMode = 'dijkstra_weighted' | 'bfs_shortest'
+
 export interface PathStep {
   nodeId: string
   nodeName: string
@@ -11,12 +13,15 @@ export interface PathStep {
   edgeId?: string
   edgeLabel?: string
   weight?: number
+  isUnsampled?: boolean
 }
 
 export interface PathResult {
   steps: PathStep[]
   length: number
   overallProbability?: number
+  mode: PathfinderMode
+  hasUnsampledEdges?: boolean
 }
 
 export class PathfinderEngine {
@@ -30,10 +35,11 @@ export class PathfinderEngine {
   }
 
   /**
-   * Encontra a rota de MAIOR PROBABILIDADE DE SUCESSO (Dijkstra Ponderado)
-   * usando os pesos estatísticos das 100+ lutas e telemetria de combate.
+   * Encontra a rota entre Origem e Destino usando o modo selecionado:
+   * - 'dijkstra_weighted': Maior probabilidade estatística de vitória (Dijkstra ponderado)
+   * - 'bfs_shortest': Menor número de saltos/transições (BFS puro)
    */
-  async findShortestPath(sourceId: string, targetId: string): Promise<PathResult | null> {
+  async findPath(sourceId: string, targetId: string, mode: PathfinderMode = 'dijkstra_weighted'): Promise<PathResult | null> {
     const G = await this.init()
 
     if (!G.hasNode(sourceId) || !G.hasNode(targetId)) {
@@ -47,20 +53,80 @@ export class PathfinderEngine {
         steps: [{ nodeId: sourceId, nodeName: name, nodeType: type }],
         length: 0,
         overallProbability: 1.0,
+        mode,
       }
     }
 
-    // Dijkstra Priority Queue: menor custo = -log(weight)
+    if (mode === 'bfs_shortest') {
+      return this.findBfsPath(G, sourceId, targetId)
+    } else {
+      return this.findDijkstraPath(G, sourceId, targetId)
+    }
+  }
+
+  /**
+   * BFS Puro (Menor Número de Saltos)
+   */
+  private findBfsPath(G: MultiDirectedGraph, sourceId: string, targetId: string): PathResult | null {
+    const queue: string[] = [sourceId]
+    const visited = new Set<string>([sourceId])
+    const prev = new Map<string, { nodeId: string; edgeId: string; edgeLabel: string; weight?: number }>()
+
+    while (queue.length > 0) {
+      const curr = queue.shift()!
+      if (curr === targetId) break
+
+      G.forEachOutEdge(curr, (edgeId, attrs, _src, tgt) => {
+        if (!visited.has(tgt)) {
+          visited.add(tgt)
+          const edgeData = attrs as Record<string, unknown>
+          const label = (edgeData.label as string) || ''
+          const weight = typeof edgeData.weight === 'number' ? edgeData.weight : undefined
+          prev.set(tgt, { nodeId: curr, edgeId, edgeLabel: label, weight })
+          queue.push(tgt)
+        }
+      })
+    }
+
+    if (!visited.has(targetId)) return null
+
+    const steps: PathStep[] = []
+    let curr = targetId
+    while (curr !== sourceId) {
+      const pData = prev.get(curr)!
+      const name = G.getNodeAttribute(curr, 'name') as string
+      const type = G.getNodeAttribute(curr, 'node_type') as string
+      steps.unshift({
+        nodeId: curr,
+        nodeName: name,
+        nodeType: type,
+        edgeId: pData.edgeId,
+        edgeLabel: pData.edgeLabel,
+        weight: pData.weight,
+        isUnsampled: pData.weight === undefined,
+      })
+      curr = pData.nodeId
+    }
+
+    const startName = G.getNodeAttribute(sourceId, 'name') as string
+    const startType = G.getNodeAttribute(sourceId, 'node_type') as string
+    steps.unshift({ nodeId: sourceId, nodeName: startName, nodeType: startType })
+
+    return { steps, length: steps.length - 1, mode: 'bfs_shortest' }
+  }
+
+  /**
+   * Dijkstra Ponderado (Maior Probabilidade de Sucesso)
+   */
+  private findDijkstraPath(G: MultiDirectedGraph, sourceId: string, targetId: string): PathResult | null {
     const dist = new Map<string, number>()
-    const prev = new Map<string, { nodeId: string; edgeId: string; edgeLabel: string; weight: number }>()
+    const prev = new Map<string, { nodeId: string; edgeId: string; edgeLabel: string; weight: number; isUnsampled: boolean }>()
 
     dist.set(sourceId, 0)
-
     const priorityQueue: Array<{ nodeId: string; cost: number }> = [{ nodeId: sourceId, cost: 0 }]
     const visited = new Set<string>()
 
     while (priorityQueue.length > 0) {
-      // Ordena para pegar o nó de menor custo
       priorityQueue.sort((a, b) => a.cost - b.cost)
       const current = priorityQueue.shift()!
 
@@ -71,29 +137,27 @@ export class PathfinderEngine {
 
       G.forEachOutEdge(current.nodeId, (edgeId, attrs, _src, tgt) => {
         const edgeData = attrs as Record<string, unknown>
-        const weight = typeof edgeData.weight === 'number' ? edgeData.weight : 0.5
+        const isUnsampled = edgeData.weight === null || edgeData.weight === undefined
+        const weight = isUnsampled ? 0.50 : (edgeData.weight as number)
         const label  = (edgeData.label as string) || ''
         
-        // Custo = -log(probabilidade) -> somar custos multiplica probabilidades
         const stepCost = -Math.log(Math.max(0.01, weight))
         const newDist = current.cost + stepCost
 
         if (newDist < (dist.get(tgt) ?? Infinity)) {
           dist.set(tgt, newDist)
-          prev.set(tgt, { nodeId: current.nodeId, edgeId, edgeLabel: label, weight })
+          prev.set(tgt, { nodeId: current.nodeId, edgeId, edgeLabel: label, weight, isUnsampled })
           priorityQueue.push({ nodeId: tgt, cost: newDist })
         }
       })
     }
 
-    if (!dist.has(targetId)) {
-      return null
-    }
+    if (!dist.has(targetId)) return null
 
-    // Reconstrói o caminho
     const steps: PathStep[] = []
     let curr = targetId
     let overallProb = 1.0
+    let hasUnsampledEdges = false
 
     while (curr !== sourceId) {
       const prevData = prev.get(curr)
@@ -102,6 +166,8 @@ export class PathfinderEngine {
       const currName = G.getNodeAttribute(curr, 'name') as string
       const currType = G.getNodeAttribute(curr, 'node_type') as string
 
+      if (prevData.isUnsampled) hasUnsampledEdges = true
+
       steps.unshift({
         nodeId: curr,
         nodeName: currName,
@@ -109,6 +175,7 @@ export class PathfinderEngine {
         edgeId: prevData.edgeId,
         edgeLabel: prevData.edgeLabel,
         weight: prevData.weight,
+        isUnsampled: prevData.isUnsampled,
       })
 
       overallProb *= prevData.weight
@@ -117,21 +184,19 @@ export class PathfinderEngine {
 
     const startName = G.getNodeAttribute(sourceId, 'name') as string
     const startType = G.getNodeAttribute(sourceId, 'node_type') as string
-    steps.unshift({
-      nodeId: sourceId,
-      nodeName: startName,
-      nodeType: startType,
-    })
+    steps.unshift({ nodeId: sourceId, nodeName: startName, nodeType: startType })
 
     return {
       steps,
       length: steps.length - 1,
       overallProbability: Math.round(overallProb * 100) / 100,
+      mode: 'dijkstra_weighted',
+      hasUnsampledEdges,
     }
   }
 
   /**
-   * Converte o caminho de transições encontrado em um novo documento do tipo Fluxograma
+   * Exporta a rota calculada para um novo documento Fluxograma
    */
   async exportPathToFlowchart(path: PathResult, title: string): Promise<BjjDoc> {
     const ownerId = getCurrentOwnerId()
@@ -139,7 +204,7 @@ export class PathfinderEngine {
     const nodes = path.steps.map((step, idx) => ({
       id: `step-${idx + 1}`,
       type: 'step',
-      title: title || `Rota BJJ (Probabilidade ${path.overallProbability ? Math.round(path.overallProbability * 100) + '%' : 'Alta'}): ${path.steps[0].nodeName} ➔ ${path.steps[path.steps.length - 1].nodeName}`,
+      title: title || `Rota BJJ (${path.mode === 'dijkstra_weighted' ? 'Dijkstra Probabilístico' : 'BFS Menor Caminho'}): ${path.steps[0].nodeName} ➔ ${path.steps[path.steps.length - 1].nodeName}`,
       data: {
         posA: {
           nodeId: step.nodeId,
@@ -169,7 +234,7 @@ export class PathfinderEngine {
 
     return documentRepository.create({
       type: 'fluxograma',
-      title: title || `Rota (Probabilidade: ${path.overallProbability ? Math.round(path.overallProbability * 100) + '%' : 'Alta'}): ${path.steps[0].nodeName} ➔ ${path.steps[path.steps.length - 1].nodeName}`,
+      title: title || `Rota (${path.mode === 'dijkstra_weighted' ? 'Probabilidade: ' + (path.overallProbability ? Math.round(path.overallProbability * 100) + '%' : 'Alta') : 'BFS ' + path.length + ' passos'}): ${path.steps[0].nodeName} ➔ ${path.steps[path.steps.length - 1].nodeName}`,
       ownerId,
       forkedFrom: null,
       visibility: 'private',
