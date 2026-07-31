@@ -3,6 +3,8 @@ import { MultiDirectedGraph } from 'graphology'
 import type { NodeAttrs, EdgeAttrs } from '../types'
 import { tNodeType, useLang, t, nodeName } from '../lib/i18n'
 import { supabase } from '../lib/supabase'
+import { canonicalConceptRepository } from '../infra/CanonicalConceptRepository'
+import type { CanonicalConcept } from '../core/canonical/types'
 
 // ── types ─────────────────────────────────────────────────────────────────────
 
@@ -188,6 +190,99 @@ function Section({
         children
       )}
     </section>
+  )
+}
+
+// ── canonical binding sub-component ──────────────────────────────────────────
+
+function CanonicalBinding({ nodeName }: { nodeName: string }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState<CanonicalConcept[]>([])
+  const [selected, setSelected] = useState<CanonicalConcept | null>(null)
+  const [searching, setSearching] = useState(false)
+
+  useEffect(() => {
+    if (!nodeName) return
+    canonicalConceptRepository.search(nodeName, 5).then(res => {
+      if (res.length > 0) {
+        setResults(res)
+        setSelected(res[0])
+      }
+    }).catch(console.error)
+  }, [nodeName])
+
+  const handleSearch = async (val: string) => {
+    setQuery(val)
+    if (val.length < 2) { setResults([]); return }
+    setSearching(true)
+    try {
+      const res = await canonicalConceptRepository.search(val, 10)
+      setResults(res)
+    } catch (e) {
+      console.error(e)
+    } finally {
+      setSearching(false)
+    }
+  }
+
+  return (
+    <div style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', borderRadius: 8, padding: 10, margin: '10px 0' }}>
+      <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase', marginBottom: 6, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>🌐 Conceito Canônico (Supabase)</span>
+        {selected && (
+          <a href="/grafo" target="_blank" rel="noreferrer" style={{ fontSize: 10, color: '#93c5fd', textDecoration: 'none' }}>
+            Abrir no Grafo ➔
+          </a>
+        )}
+      </div>
+
+      {selected ? (
+        <div style={{ fontSize: 12, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{ fontWeight: 600, color: 'var(--fg)' }}>
+            {selected.preferred_name || (selected as unknown as Record<string, unknown>).name as string}
+          </div>
+          {selected.canonical_id && (
+            <code style={{ fontSize: 10, color: 'var(--muted)' }}>{selected.canonical_id}</code>
+          )}
+          {selected.structural_signature && (
+            <div style={{ fontSize: 10, color: '#93c5fd', background: 'rgba(0,0,0,0.2)', padding: '2px 6px', borderRadius: 4 }}>
+              {selected.structural_signature.from_posture} ➔ {selected.structural_signature.mechanism} ➔ {selected.structural_signature.to_posture}
+            </div>
+          )}
+          <button
+            onClick={() => setSelected(null)}
+            style={{ fontSize: 10, background: 'transparent', border: 'none', color: 'var(--muted)', cursor: 'pointer', textAlign: 'left', marginTop: 4, textDecoration: 'underline' }}
+          >
+            Alterar vínculo canônico
+          </button>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <input
+            type="text"
+            placeholder="Vincular às 2.086 posições oficiais..."
+            value={query}
+            onChange={e => handleSearch(e.target.value)}
+            style={{ padding: '6px 8px', borderRadius: 4, border: '1px solid var(--border)', background: '#0f172a', color: '#fff', fontSize: 11 }}
+          />
+          {searching && <span style={{ fontSize: 10, color: 'var(--muted)' }}>Buscando no banco...</span>}
+          {results.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 120, overflowY: 'auto' }}>
+              {results.map(c => (
+                <div
+                  key={c.id}
+                  onClick={() => setSelected(c)}
+                  style={{ padding: '4px 6px', borderRadius: 4, background: 'rgba(255,255,255,0.05)', fontSize: 11, cursor: 'pointer' }}
+                >
+                  <strong>{c.preferred_name || (c as unknown as Record<string, unknown>).name as string}</strong>
+                  <span style={{ fontSize: 10, color: 'var(--muted)', display: 'block' }}>{c.gi_nogi} | {c.canonical_id}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -385,6 +480,8 @@ export default function NodePanel({
           {t('panel.see_desc', lang)}
         </button>
       )}
+
+      <CanonicalBinding nodeName={nodeName(node, lang)} />
 
       {isTransition ? (
         <>
