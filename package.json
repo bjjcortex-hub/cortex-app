@@ -6,6 +6,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "deploy": "npm run build && node scripts/sync-root.mjs && gh-pages -d dist --dotfiles --nojekyll",
     "snapshot": "tsx scripts/snapshot.ts",
     "import:grapplemap": "tsx scripts/import-grapplemap.ts",
     "import:grapplemap:dry": "tsx scripts/import-grapplemap.ts --dry-run"

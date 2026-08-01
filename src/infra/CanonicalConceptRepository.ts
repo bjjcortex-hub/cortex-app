@@ -286,6 +286,115 @@ export class ProposalRepository {
   }
 }
 
+// ─── CuratorProfileRepository ─────────────────────────────────────────────────
+// Lê e grava a graduação real do curador a partir de curator_profiles no Supabase.
+// A graduação é atribuída pelo admin via SQL — nunca vem de um seletor livre na tela.
+
+export type BeltRank = 'preta' | 'marrom' | 'roxa' | 'azul' | 'branca'
+
+export const BELT_WEIGHTS: Record<BeltRank, number> = {
+  preta: 5, marrom: 4, roxa: 3, azul: 2, branca: 1,
+}
+
+export interface CuratorProfile {
+  id: string
+  user_id: string
+  belt_rank: BeltRank
+}
+
+export class CuratorProfileRepository {
+  /** Busca o perfil do curador autenticado. Retorna null se não for curador. */
+  async getMyProfile(userId: string): Promise<CuratorProfile | null> {
+    const { data, error } = await supabaseAnon
+      .from('curator_profiles')
+      .select('*')
+      .eq('user_id', userId)
+      .maybeSingle()
+    if (error) throw new Error(`getMyProfile: ${error.message}`)
+    if (!data) return null
+    return { id: data.id, user_id: data.user_id, belt_rank: data.belt_rank as BeltRank }
+  }
+}
+
+// ─── CuratorVoteRepository ────────────────────────────────────────────────────
+// Persiste votos na tabela curator_votes com constraint UNIQUE (proposal_id, curator_id).
+// Garante que o mesmo curador não vota duas vezes na mesma proposta.
+
+export interface CuratorVoteRecord {
+  proposal_id: string
+  curator_id: string
+  belt_rank: BeltRank
+  vote_weight: number
+  is_veto: boolean
+}
+
+export interface ProposalVoteSummary {
+  totalScore: number
+  hasHighRankVote: boolean   // ao menos 1 voto de preta ou marrom
+  userHasVoted: boolean      // o curador atual já votou
+  userVoteIsVeto: boolean    // o curador atual vetou
+  votes: CuratorVoteRecord[]
+}
+
+export class CuratorVoteRepository {
+  /**
+   * Carrega os votos persistidos de uma proposta e calcula o placar real.
+   */
+  async getSummary(proposalId: string, currentUserId: string): Promise<ProposalVoteSummary> {
+    const { data, error } = await supabaseAnon
+      .from('curator_votes')
+      .select('*')
+      .eq('proposal_id', proposalId)
+    if (error) throw new Error(`getSummary: ${error.message}`)
+
+    const votes = (data ?? []) as CuratorVoteRecord[]
+    const totalScore = votes.reduce((acc, v) => acc + (v.is_veto ? -v.vote_weight : v.vote_weight), 0)
+    const hasHighRankVote = votes.some(v => !v.is_veto && (v.belt_rank === 'preta' || v.belt_rank === 'marrom'))
+    const myVote = votes.find(v => v.curator_id === currentUserId)
+
+    return {
+      totalScore,
+      hasHighRankVote,
+      userHasVoted: !!myVote,
+      userVoteIsVeto: myVote?.is_veto ?? false,
+      votes,
+    }
+  }
+
+  /**
+   * Registra um voto (ou veto) do curador no Supabase.
+   * Se o curador já votou, lança um erro (a constraint DB impede duplicatas).
+   */
+  async castVote(
+    proposalId: string,
+    curator: CuratorProfile,
+    isVeto: boolean,
+  ): Promise<CuratorVoteRecord> {
+    const weight = BELT_WEIGHTS[curator.belt_rank]
+    const { data, error } = await supabaseAnon
+      .from('curator_votes')
+      .insert({
+        proposal_id:  proposalId,
+        curator_id:   curator.user_id,
+        belt_rank:    curator.belt_rank,
+        vote_weight:  weight,
+        is_veto:      isVeto,
+      })
+      .select('*')
+      .single()
+
+    if (error) {
+      if (error.code === '23505') {
+        throw new Error('Você já votou nesta proposta. Cada curador pode votar apenas uma vez.')
+      }
+      throw new Error(`castVote: ${error.message}`)
+    }
+    return data as CuratorVoteRecord
+  }
+}
+
 // Singletons
 export const canonicalConceptRepository = new CanonicalConceptRepository()
 export const proposalRepository = new ProposalRepository()
+export const curatorProfileRepository = new CuratorProfileRepository()
+export const curatorVoteRepository = new CuratorVoteRepository()
