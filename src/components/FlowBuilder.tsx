@@ -8,7 +8,7 @@ import { useLang, t, type Lang } from '../lib/i18n'
 import { NodeIcon, iconColor } from './NodeIcon'
 import { serializeFluxograma, deserializeFluxograma } from '../modes/fluxograma/serializer'
 import { resolveToParent, buildParentByChildId } from '../lib/graphUtils'
-import { loadFlows, saveFlowToDB, deleteFlowFromDB } from '../lib/flowStorage'
+import { loadFlows, saveFlowToDB, deleteFlowFromDB, type FlowGiNogi, type FlowContext, type FlowOutcome } from '../lib/flowStorage'
 
 
 function uid(): string {
@@ -56,6 +56,9 @@ interface SavedFlow {
   date?: string
   description?: string
   videoLink?: string
+  gi_nogi:  FlowGiNogi
+  context:  FlowContext
+  outcome:  FlowOutcome
 }
 
 type PanelPhase =
@@ -551,6 +554,9 @@ export default function FlowBuilder({
   const [flowDate, setFlowDate]     = useState(docInitial?.date ?? '')
   const [flowDesc, setFlowDesc]     = useState(docInitial?.description ?? '')
   const [flowVideo, setFlowVideo]   = useState(docInitial?.videoLink ?? '')
+  const [flowGiNogi, setFlowGiNogi] = useState<FlowGiNogi>(docInitial?.gi_nogi ?? 'both')
+  const [flowContext, setFlowContext] = useState<FlowContext>(docInitial?.context ?? 'training')
+  const [flowOutcome, setFlowOutcome] = useState<FlowOutcome>(docInitial?.outcome ?? 'unfinished')
   const [panel, setPanel]           = useState<PanelPhase>({ type: 'idle' })
   const [savedFlows, setSaved]      = useState<SavedFlow[]>([])
   const [flowsLoading, setFlowsLoading] = useState(true)
@@ -748,6 +754,9 @@ export default function FlowBuilder({
       date: flowDate || undefined,
       description: flowDesc || undefined,
       videoLink: flowVideo || undefined,
+      gi_nogi: flowGiNogi,
+      context: flowContext,
+      outcome: flowOutcome,
     }
     saveFlowToDB(record)
       .then(saved => setSaved(prev => [saved as SavedFlow, ...prev]))
@@ -757,6 +766,9 @@ export default function FlowBuilder({
   function loadFlow(flow: SavedFlow) {
     setFlowName(flow.name); setNameA(flow.nameA); setNameB(flow.nameB)
     setFlowDate(flow.date ?? ''); setFlowDesc(flow.description ?? ''); setFlowVideo(flow.videoLink ?? '')
+    setFlowGiNogi(flow.gi_nogi ?? 'both')
+    setFlowContext(flow.context ?? 'training')
+    setFlowOutcome(flow.outcome ?? 'unfinished')
     setSteps(flow.steps); setPanel({ type: 'idle' }); setShowSaved(false)
   }
 
@@ -849,8 +861,12 @@ export default function FlowBuilder({
   // ── doc mode: emit changes to parent ─────────────────────────
   const emitDocChange = useCallback(() => {
     if (!onDataChange) return
-    onDataChange(serializeFluxograma(steps, nameA, nameB, flowName, flowDate || undefined, flowDesc || undefined, flowVideo || undefined))
-  }, [onDataChange, steps, nameA, nameB, flowName])
+    onDataChange(serializeFluxograma(
+      steps, nameA, nameB, flowName,
+      flowDate || undefined, flowDesc || undefined, flowVideo || undefined,
+      flowGiNogi, flowContext, flowOutcome,
+    ))
+  }, [onDataChange, steps, nameA, nameB, flowName, flowGiNogi, flowContext, flowOutcome])
 
   useEffect(() => { emitDocChange() }, [emitDocChange])
 
@@ -877,6 +893,41 @@ export default function FlowBuilder({
           <input className="flow-meta-input" type="date" value={flowDate} onChange={e => setFlowDate(e.target.value)} title={t('flow.date', lang)} />
           <input className="flow-meta-input" value={flowDesc} onChange={e => setFlowDesc(e.target.value)} placeholder={t('flow.description', lang)} />
           <input className="flow-meta-input" value={flowVideo} onChange={e => setFlowVideo(e.target.value)} placeholder={t('flow.video_link', lang)} />
+          {/* ── Contexto de agregação ─────────────────────────────────── */}
+          <select
+            id="flow-gi-nogi"
+            className="flow-meta-input"
+            value={flowGiNogi}
+            onChange={e => setFlowGiNogi(e.target.value as FlowGiNogi)}
+            title="Gi / No-Gi"
+          >
+            <option value="both">Gi + No-Gi</option>
+            <option value="gi">Gi</option>
+            <option value="nogi">No-Gi</option>
+          </select>
+          <select
+            id="flow-context"
+            className="flow-meta-input"
+            value={flowContext}
+            onChange={e => setFlowContext(e.target.value as FlowContext)}
+            title="Contexto"
+          >
+            <option value="training">Treino</option>
+            <option value="sparring">Sparring</option>
+            <option value="competition">Competição</option>
+          </select>
+          <select
+            id="flow-outcome"
+            className="flow-meta-input"
+            value={flowOutcome}
+            onChange={e => setFlowOutcome(e.target.value as FlowOutcome)}
+            title="Resultado"
+          >
+            <option value="unfinished">Sem resultado</option>
+            <option value="win">Vitória (A)</option>
+            <option value="loss">Derrota (A)</option>
+            <option value="draw">Empate</option>
+          </select>
         </div>
         <h3 className="flow-start-title">{t('flow.how_start', lang)}</h3>
         {!graph && (

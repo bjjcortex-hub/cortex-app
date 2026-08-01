@@ -1,5 +1,9 @@
 import { supabaseAnon } from './supabase'
 
+export type FlowGiNogi  = 'gi' | 'nogi' | 'both'
+export type FlowContext = 'competition' | 'training' | 'sparring'
+export type FlowOutcome = 'win' | 'loss' | 'draw' | 'unfinished'
+
 export interface FlowRecord {
   id: string
   name: string
@@ -11,6 +15,10 @@ export interface FlowRecord {
   date?: string
   description?: string
   videoLink?: string
+  // ── Contexto de uso (necessário para segmentação no aggregate-telemetry) ──
+  gi_nogi:  FlowGiNogi   // 'gi' | 'nogi' | 'both'
+  context:  FlowContext  // 'competition' | 'training' | 'sparring'
+  outcome:  FlowOutcome  // 'win' | 'loss' | 'draw' | 'unfinished'
 }
 
 async function getOwnerId(): Promise<string> {
@@ -33,6 +41,10 @@ function rowToRecord(row: DbRow): FlowRecord {
     date:        row.data.date         as string | undefined,
     description: row.data.description  as string | undefined,
     videoLink:   row.data.videoLink    as string | undefined,
+    // Campos de contexto — default para dados legados sem esses campos
+    gi_nogi:     (row.data.gi_nogi  as FlowGiNogi)  ?? 'both',
+    context:     (row.data.context  as FlowContext)  ?? 'training',
+    outcome:     (row.data.outcome  as FlowOutcome)  ?? 'unfinished',
   }
 }
 
@@ -50,7 +62,7 @@ export async function loadFlows(): Promise<FlowRecord[]> {
 
 export async function saveFlowToDB(flow: Omit<FlowRecord, 'id'>): Promise<FlowRecord> {
   const ownerId = await getOwnerId()
-  const { name, nameA, nameB, steps, savedAt, date, description, videoLink } = flow
+  const { name, nameA, nameB, steps, savedAt, date, description, videoLink, gi_nogi, context, outcome } = flow
   const { data, error } = await supabaseAnon
     .from('user_documents')
     .insert({
@@ -58,7 +70,7 @@ export async function saveFlowToDB(flow: Omit<FlowRecord, 'id'>): Promise<FlowRe
       title:      name,
       owner_id:   ownerId,
       visibility: 'private',
-      data:       { nameA, nameB, steps, savedAt, date, description, videoLink },
+      data:       { nameA, nameB, steps, savedAt, date, description, videoLink, gi_nogi, context, outcome },
     })
     .select('id, title, data, updated_at')
     .single()

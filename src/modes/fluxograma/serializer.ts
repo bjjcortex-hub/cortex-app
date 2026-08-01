@@ -1,14 +1,19 @@
 import type { DocumentData, CanvasNode, CanvasEdge } from '../../core/document/types'
 import type { FightStep, Attempt, FightPos, Actor, SavedFlow } from '../../components/FlowBuilder'
 
+import type { FlowGiNogi, FlowContext, FlowOutcome } from '../../lib/flowStorage'
+
 export interface FluxogramaState {
-  steps:       FightStep[]
-  nameA:       string
-  nameB:       string
-  flowName:    string
-  date?:       string
+  steps:        FightStep[]
+  nameA:        string
+  nameB:        string
+  flowName:     string
+  date?:        string
   description?: string
-  videoLink?:  string
+  videoLink?:   string
+  gi_nogi:      FlowGiNogi   // 'gi' | 'nogi' | 'both'
+  context:      FlowContext  // 'competition' | 'training' | 'sparring'
+  outcome:      FlowOutcome  // 'win' | 'loss' | 'draw' | 'unfinished'
 }
 
 export function serializeFluxograma(
@@ -19,6 +24,9 @@ export function serializeFluxograma(
   date?: string,
   description?: string,
   videoLink?: string,
+  gi_nogi: FlowGiNogi = 'both',
+  context: FlowContext = 'training',
+  outcome: FlowOutcome = 'unfinished',
 ): DocumentData {
   const nodes: CanvasNode[] = steps.map(step => ({
     id:    step.id,
@@ -32,6 +40,9 @@ export function serializeFluxograma(
       date,
       description,
       videoLink,
+      gi_nogi,
+      context,
+      outcome,
     },
   }))
 
@@ -68,6 +79,10 @@ export function deserializeFluxograma(data: DocumentData): FluxogramaState {
   const date        = (firstMeta.date        as string | undefined)
   const description = (firstMeta.description as string | undefined)
   const videoLink   = (firstMeta.videoLink   as string | undefined)
+  // Contexto — retrocompat: dados antigos usam os defaults
+  const gi_nogi     = (firstMeta.gi_nogi as FlowGiNogi | undefined) ?? 'both'
+  const context     = (firstMeta.context as FlowContext | undefined) ?? 'training'
+  const outcome     = (firstMeta.outcome as FlowOutcome | undefined) ?? 'unfinished'
 
   const stepIdx = new Map<string, number>(stepNodes.map((n, i) => [n.id, i]))
 
@@ -92,7 +107,7 @@ export function deserializeFluxograma(data: DocumentData): FluxogramaState {
     })
   }
 
-  return { steps, nameA, nameB, flowName, date, description, videoLink }
+  return { steps, nameA, nameB, flowName, date, description, videoLink, gi_nogi, context, outcome }
 }
 
 // Convert a FluxogramaState to a SavedFlow shape (for use with extractMindmap)
@@ -107,5 +122,8 @@ export function stateToSavedFlow(state: FluxogramaState): SavedFlow {
     date:        state.date,
     description: state.description,
     videoLink:   state.videoLink,
+    gi_nogi:     state.gi_nogi,
+    context:     state.context,
+    outcome:     state.outcome,
   }
 }
