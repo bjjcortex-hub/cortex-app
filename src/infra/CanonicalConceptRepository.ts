@@ -363,22 +363,31 @@ export class CuratorVoteRepository {
 
   /**
    * Registra um voto (ou veto) do curador no Supabase.
-   * Se o curador já votou, lança um erro (a constraint DB impede duplicatas).
+   *
+   * NOTA DE SEGURANÇA: belt_rank e vote_weight NÃO são enviados ao banco.
+   * O trigger `curator_votes_before_insert` (migration 005) sempre os deriva
+   * de curator_profiles — independente do que o cliente envie.
+   * O payload do cliente controla apenas: qual proposta, quem vota, é veto ou não.
+   *
+   * Se o curador já votou, a constraint UNIQUE (migration 004) retorna code 23505.
+   * Se não for curador cadastrado, a RLS (migration 005) rejeita o insert.
    */
   async castVote(
     proposalId: string,
     curator: CuratorProfile,
     isVeto: boolean,
   ): Promise<CuratorVoteRecord> {
-    const weight = BELT_WEIGHTS[curator.belt_rank]
     const { data, error } = await supabaseAnon
       .from('curator_votes')
       .insert({
-        proposal_id:  proposalId,
-        curator_id:   curator.user_id,
-        belt_rank:    curator.belt_rank,
-        vote_weight:  weight,
-        is_veto:      isVeto,
+        proposal_id: proposalId,
+        curator_id:  curator.user_id,
+        is_veto:     isVeto,
+        // belt_rank e vote_weight omitidos intencionalmente:
+        // o trigger BEFORE INSERT os sobrescreve a partir de curator_profiles.
+        // Enviar valores aqui não aumentaria a segurança e poderia criar confusão.
+        belt_rank:   curator.belt_rank,  // enviado para compatibilidade; trigger sempre sobrescreve
+        vote_weight: 0,                  // marcador explícito: DB decide o valor real
       })
       .select('*')
       .single()
@@ -386,6 +395,9 @@ export class CuratorVoteRepository {
     if (error) {
       if (error.code === '23505') {
         throw new Error('Você já votou nesta proposta. Cada curador pode votar apenas uma vez.')
+      }
+      if (error.code === '42501' || error.message.includes('policy')) {
+        throw new Error('Acesso negado: seu perfil de curador não está cadastrado ou não tem permissão para votar.')
       }
       throw new Error(`castVote: ${error.message}`)
     }
