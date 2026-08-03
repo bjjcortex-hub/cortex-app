@@ -137,14 +137,14 @@ export class InterpretiveAiEngine {
     if (finalConfidence > 0.85) confidenceTier = 'high'
     else if (finalConfidence >= 0.5) confidenceTier = 'medium'
 
-    // Explicação gerada pela IA
+    // Explicação detalhada gerada pela IA
     let reasoning = ''
     if (confidenceTier === 'high' && bestMatch) {
-      reasoning = `Alta correspondência com o conceito existente "${bestMatch.preferred_name || (bestMatch as unknown as Record<string, unknown>).name}". Assinatura biomecânica e nomenclaturas coincidem com a base canônica.`
+      reasoning = `Alta correspondência (${Math.round(finalConfidence * 100)}%) identificada com o conceito canônico "${bestMatch.preferred_name || (bestMatch as unknown as Record<string, unknown>).name}". A assinatura estrutural [${fromPosture} ➔ ${mechanism} ➔ ${toPosture}] coincide diretamente com o nó registrado.`
     } else if (confidenceTier === 'medium' && bestMatch) {
-      reasoning = `Correspondência parcial com "${bestMatch.preferred_name || (bestMatch as unknown as Record<string, unknown>).name}". Trata-se provavelmente de uma variação técnica ou transição intermediária.`
+      reasoning = `Correspondência parcial (${Math.round(finalConfidence * 100)}%) com "${bestMatch.preferred_name || (bestMatch as unknown as Record<string, unknown>).name}". Identificado como possível variação técnica, ajuste de pegada ou transição intermediária.`
     } else {
-      reasoning = `Baixa correspondência encontrada na base canônica (<50%). Candidato a CONCEITO GENUINAMENTE NOVO ou variação atípica.`
+      reasoning = `Baixa correspondência (${Math.round(finalConfidence * 100)}%) encontrada na base canônica. Classificado como CANDIDATO A CONCEITO GENUINAMENTE NOVO ou variação atípica de alta prioridade para revisão do conselho.`
     }
 
     return {
